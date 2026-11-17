@@ -13,7 +13,7 @@ that shipped, the history from a clone of the repository.
 | view | question |
 |---|---|
 | `WhichChange(fingerprint, project, sourceRoot?)` | one failure, traced to the change and its pull request |
-| `FailuresAndTheirChanges(project, sourceRoot?, limit?)` | every failure with a line in the application's code, and the change behind each |
+| `FailuresAndTheirChanges(project, sourceRoot?, logs?, limit?)` | every failure with a line in the application's code, and the change behind each |
 
 `project` is the repository at the commit that was running:
 `https://github.com/owner/repo@<full sha>`. `fingerprint` comes from realm-jvm-logs' `JvmLogFailures`.

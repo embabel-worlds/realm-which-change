@@ -47,9 +47,11 @@
   params:
     project: { type: string, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
     sourceRoot: { type: string, default: "src/main/java", description: "Where the application's Java source sits in the repository." }
+    logs: { type: string, default: "", description: "Only the log files under this path, e.g. 'logs/shop'; empty for every log the world holds. Name the service's own logs: a failure from another program has no file in this repository." }
     limit: { type: int, default: 25, description: "How many failures to return." }
   cypher: |
     MATCH (me:AssistantUser)-[:HAS_LOG_EVENT]->(e:LogEvent {hasTrace: true})
+    WHERE $logs = '' OR e.path STARTS WITH $logs
     MATCH (e)-[:HAS_EXCEPTION]->(x:JavaThrowable {isRootCause: true})
     WITH x.exception AS exception, x.message AS message, x.jarFrame AS frame, x.jarFrameLine AS line, x.sourceKey AS sourceKey,
          count(e) AS occurrences, min(e.timestamp) AS firstSeen, max(e.timestamp) AS lastSeen
