@@ -1,0 +1,37 @@
+# The stack trace in a pod's log event, read by realm-jvm-logs' own stack-trace producers. A
+# KubeLogEvent is realm-kubernetes' and knows no language; these two types are what a Java trace in
+# one says. No jar is read: a frame names its class's package, file and line by itself.
+#
+#   KubeLogEvent ─THREW▶ PodJavaThrowable
+#                ─AT_FRAME▶ PodJavaStackFrame
+
+- name: PodJavaThrowable
+  visibility: internal
+  userAnchor: false
+  description: "One throwable in the Java stack trace a pod's log event logged: the one thrown, or a cause. `isRootCause` marks the bottom of the cause chain. Reached from (:KubeLogEvent)-[:THREW]->."
+  properties:
+    id: { identity: true, description: "`<trace id>#<index>`. Identity." }
+    index: { type: int, description: "Which throwable in the trace: 0 is the one thrown." }
+    exception: "The exception's class."
+    message: "Its message."
+    isRootCause: { type: boolean, description: "True at the bottom of the cause chain." }
+  virtualJoins:
+    - { anchorLabel: KubeLogEvent, relationship: THREW, keyField: content, recordKeyField: anchorKey, producer: traceExceptions,
+        description: "The throwables a pod's log event logged." }
+
+- name: PodJavaStackFrame
+  visibility: internal
+  userAnchor: false
+  description: "One frame of the Java stack trace a pod's log event logged: the class, method, file and line. `sourcePath` is the class's package path and file (`com/acme/Cart.java`), which is how a frame is matched to a file in a repository. Reached from (:KubeLogEvent)-[:AT_FRAME]->."
+  properties:
+    id: { identity: true, description: "`<trace id>#<throwable>.<frame>`. Identity." }
+    exceptionIndex: { type: int, description: "Which throwable the frame belongs to." }
+    frame: { type: int, description: "The frame's position in its throwable, 0 first." }
+    className: "The frame's class."
+    method: "The method."
+    file: "The file the frame names."
+    line: { type: int, description: "The line." }
+    sourcePath: "Package path and file, e.g. `com/acme/Cart.java`."
+  virtualJoins:
+    - { anchorLabel: KubeLogEvent, relationship: AT_FRAME, keyField: content, recordKeyField: anchorKey, producer: traceFrames,
+        description: "The frames of the trace a pod's log event logged." }
