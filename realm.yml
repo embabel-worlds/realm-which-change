@@ -1,0 +1,21 @@
+name: which-change
+description: |
+  Which change broke production? From a failure in a Java service's logs to the line that threw it,
+  the commit that last changed that line, who wrote it and whether a coding agent helped, and the
+  pull request that brought it in. One query, with nothing installed in the application.
+
+  It adds no data of its own. Its views join three realms: realm-jvm-logs (the failure and the
+  code), realm-git (who last changed each line) and realm-github (the pull request).
+
+  Requires realm-jvm-logs, realm-java-code, realm-java-source-code, realm-git, realm-github and
+  realm-dev-vocabulary.
+version: 0.1.0
+maturity: experimental
+url: https://github.com/embabel-worlds/realm-which-change
+author: Rod Johnson
+category: developer
+tags:
+  - developer-tools
+  - operations
+  - java
+  - git

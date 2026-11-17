@@ -1,0 +1,64 @@
+# From a failure in the logs to the change that caused it. Each view joins three realms in one query:
+# the logs and the code that failed (realm-jvm-logs), who last changed that line (realm-git), and
+# the pull request that brought the change in (realm-github).
+#
+# `project` is the repository AT THE COMMIT THAT WAS RUNNING: 'https://github.com/owner/repo@<sha>'.
+# Blame read at any other commit answers for a different file.
+
+- name: WhichChange
+  description: >-
+    SELECT THIS for "which change broke this", "who changed the line that is failing", "which pull
+    request caused this error", "did an agent write the code that failed". One logged failure, by
+    its fingerprint (from JvmLogFailures), traced to its cause: the exception and how often it
+    occurred, the method and line in the application that threw it, the commit that last changed
+    that line, who wrote it and whether a coding agent helped (authorKind), and the pull request
+    that brought it in. `olderThanHistoryRead` true means that commit or an older one. The line is
+    the one the stack trace names: the change that last touched it is the place to look first, not
+    a proof of cause.
+  params:
+    fingerprint: { type: string, description: "The failure's fingerprint, from JvmLogFailures." }
+    project: { type: string, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
+    sourceRoot: { type: string, default: "src/main/java", description: "Where the application's Java source sits in the repository." }
+  cypher: |
+    MATCH (me:AssistantUser)-[:HAS_LOG_EVENT]->(e:LogEvent {hasTrace: true})
+    WHERE e.fingerprint = $fingerprint
+    MATCH (e)-[:HAS_EXCEPTION]->(x:JavaThrowable {isRootCause: true})
+    WITH x.exception AS exception, x.message AS message, x.jarFrame AS frame, x.jarFrameLine AS line, x.sourceKey AS sourceKey,
+         count(e) AS occurrences, min(e.timestamp) AS firstSeen, max(e.timestamp) AS lastSeen
+    WITH exception, message, frame, line, occurrences, firstSeen, lastSeen,
+         $project + '!' + $sourceRoot + '/' + last(split(sourceKey, '!')) AS file,
+         split(split($project, 'github.com/')[1], '@')[0] AS repository
+    MATCH (f:GitFile {key: file})-[:HAS_BLAME]->(b:GitBlameRange)
+    WHERE b.startLine <= line AND b.endLine >= line
+    OPTIONAL MATCH (r:GitHubRepository {full_name: repository})-[:HAS_PULL_REQUEST]->(pr:GitHubPullRequest)-[:HAS_COMMIT]->(c:GitHubCommit)
+    WHERE c.sha = b.sha
+    RETURN exception, message, frame, line, occurrences, firstSeen, lastSeen,
+           b.shortSha AS commit, b.title AS change, b.authorName AS author, b.authorKind AS authorKind, b.authoredAt AS changedAt,
+           b.boundary AS olderThanHistoryRead, pr.number AS pullRequest, pr.title AS pullRequestTitle, pr.html_url AS pullRequestUrl,
+           b.sha AS sha, b.sourceUrl AS commitUrl
+
+- name: FailuresAndTheirChanges
+  description: >-
+    SELECT THIS for "what is failing and which changes are behind it", "the failures in the logs
+    with who last changed the code". Every failure the logs recorded that has a line in the
+    application's own code, each with the commit that last changed that line and who wrote it,
+    newest failure first. One read of the repository's history per file that failed. For the pull
+    request behind one of them, ask WhichChange with its fingerprint.
+  params:
+    project: { type: string, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
+    sourceRoot: { type: string, default: "src/main/java", description: "Where the application's Java source sits in the repository." }
+    limit: { type: int, default: 25, description: "How many failures to return." }
+  cypher: |
+    MATCH (me:AssistantUser)-[:HAS_LOG_EVENT]->(e:LogEvent {hasTrace: true})
+    MATCH (e)-[:HAS_EXCEPTION]->(x:JavaThrowable {isRootCause: true})
+    WITH x.exception AS exception, x.message AS message, x.jarFrame AS frame, x.jarFrameLine AS line, x.sourceKey AS sourceKey,
+         count(e) AS occurrences, min(e.timestamp) AS firstSeen, max(e.timestamp) AS lastSeen
+    WITH exception, message, frame, line, occurrences, firstSeen, lastSeen,
+         $project + '!' + $sourceRoot + '/' + last(split(sourceKey, '!')) AS file
+    MATCH (f:GitFile {key: file})-[:HAS_BLAME]->(b:GitBlameRange)
+    WHERE b.startLine <= line AND b.endLine >= line
+    RETURN exception, message, frame, line, occurrences, firstSeen, lastSeen,
+           b.shortSha AS commit, b.title AS change, b.authorName AS author, b.authorKind AS authorKind, b.authoredAt AS changedAt,
+           b.boundary AS olderThanHistoryRead, b.sha AS sha, b.sourceUrl AS commitUrl
+    ORDER BY lastSeen DESC
+    LIMIT $limit
