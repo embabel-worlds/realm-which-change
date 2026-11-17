@@ -28,8 +28,8 @@
       UNION
       WITH p MATCH (p)-[:HAS_PREVIOUS_LOG_EVENT]->(before:KubeLogEvent {hasTrace: true}) RETURN before AS e
     }
-    MATCH (e)-[:THREW]->(x:PodJavaThrowable {isRootCause: true})
-    MATCH (e)-[:AT_FRAME]->(fr:PodJavaStackFrame)
+    MATCH (e:KubeLogEvent)-[:THREW]->(x:PodJavaThrowable {isRootCause: true})
+    MATCH (e:KubeLogEvent)-[:AT_FRAME]->(fr:PodJavaStackFrame)
     WHERE fr.exceptionIndex = x.index AND fr.sourcePath IS NOT NULL
     WITH running, e.fingerprint AS fingerprint, x.exception AS exception, x.message AS message,
          fr.sourcePath AS sourcePath, fr.line AS line, fr.frame AS depth, fr.className + '.' + fr.method AS frame,
