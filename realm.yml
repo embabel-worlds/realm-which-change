@@ -4,10 +4,15 @@ description: |
   the commit that last changed that line, who wrote it and whether a coding agent helped, and the
   pull request that brought it in. One query, with nothing installed in the application.
 
-  It adds no data of its own. Its views join three realms: realm-jvm-logs (the failure and the
-  code), realm-git (who last changed each line) and realm-github (the pull request).
+  It adds no data of its own. Its views join realms that each know one thing: realm-jvm-logs (the
+  failure and its stack trace), realm-polyglot-code (the repository's files), realm-git (who last
+  changed each line), realm-github (the pull request) and realm-kubernetes (what is running, at
+  which commit).
 
-  Requires realm-jvm-logs, realm-java-code, realm-java-source-code, realm-git, realm-github and
+  No jar is needed: the application's own code is whichever stack frame names a file that is in
+  the repository at the commit that was running.
+
+  Requires realm-jvm-logs, realm-polyglot-code, realm-git, realm-github, realm-kubernetes and
   realm-dev-vocabulary.
 version: 0.1.0
 maturity: experimental

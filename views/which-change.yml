@@ -1,38 +1,48 @@
-# From a failure in the logs to the change that caused it. Each view joins three realms in one query:
-# the logs and the code that failed (realm-jvm-logs), who last changed that line (realm-git), and
-# the pull request that brought the change in (realm-github).
+# From a failure in the logs to the change that caused it. Each view joins realms that each know one
+# thing: the logs and their stack traces (realm-jvm-logs), the repository's files (realm-polyglot-code),
+# who last changed each line (realm-git), and the pull request that brought the change in (realm-github).
 #
 # `project` is the repository AT THE COMMIT THAT WAS RUNNING: 'https://github.com/owner/repo@<sha>'.
-# Blame read at any other commit answers for a different file.
+# Blame read at any other commit answers for a different file: one commit that adds a line above
+# moves every line below it. RunningVersions says which commit is running.
+#
+# NO JAR IS NEEDED. "The application's own code" is decided from the repository: a stack frame
+# names its class's package and file (`com/acme/Cart.java`), and the first frame of the root cause
+# whose file is in the repository at that commit is where the application was. A frame in a library
+# or the JDK has no file there.
 
 - name: WhichChange
   description: >-
     SELECT THIS for "which change broke this", "who changed the line that is failing", "which pull
     request caused this error", "did an agent write the code that failed". One logged failure, by
     its fingerprint (from JvmLogFailures), traced to its cause: the exception and how often it
-    occurred, the method and line in the application that threw it, the commit that last changed
-    that line, who wrote it and whether a coding agent helped (authorKind), and the pull request
-    that brought it in. `olderThanHistoryRead` true means that commit or an older one. The line is
-    the one the stack trace names: the change that last touched it is the place to look first, not
-    a proof of cause.
+    occurred, the method, file and line in the application that threw it, the commit that last
+    changed that line, who wrote it and whether a coding agent helped (authorKind), and the pull
+    request that brought it in. `olderThanHistoryRead` true means that commit or an older one. The
+    line is the one the stack trace names: the change that last touched it is the place to look
+    first, not a proof of cause. No rows means no frame of the failure is in this repository.
   params:
     fingerprint: { type: string, description: "The failure's fingerprint, from JvmLogFailures." }
     project: { type: string, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
-    sourceRoot: { type: string, default: "src/main/java", description: "Where the application's Java source sits in the repository." }
   cypher: |
     MATCH (me:AssistantUser)-[:HAS_LOG_EVENT]->(e:LogEvent {hasTrace: true})
     WHERE e.fingerprint = $fingerprint
     MATCH (e)-[:HAS_EXCEPTION]->(x:JavaThrowable {isRootCause: true})
-    WITH x.exception AS exception, x.message AS message, x.jarFrame AS frame, x.jarFrameLine AS line, x.sourceKey AS sourceKey,
-         count(e) AS occurrences, min(e.timestamp) AS firstSeen, max(e.timestamp) AS lastSeen
-    WITH exception, message, frame, line, occurrences, firstSeen, lastSeen,
-         $project + '!' + $sourceRoot + '/' + last(split(sourceKey, '!')) AS file,
+    MATCH (e)-[:HAS_FRAME]->(fr:JavaStackFrame)
+    WHERE fr.exceptionIndex = x.index AND fr.sourcePath IS NOT NULL
+    WITH x.exception AS exception, x.message AS message, fr.sourcePath AS sourcePath, fr.line AS line, fr.frame AS depth,
+         fr.className + '.' + fr.method AS frame, count(DISTINCT e) AS occurrences, min(e.timestamp) AS firstSeen, max(e.timestamp) AS lastSeen
+    MATCH (cp:CodeProject {key: $project})-[:HAS_SOURCE]->(s:Source)
+    WHERE s.path = sourcePath OR s.path ENDS WITH '/' + sourcePath
+    WITH exception, message, frame, line, depth, occurrences, firstSeen, lastSeen, s.path AS path
+    ORDER BY depth LIMIT 1
+    WITH exception, message, frame, line, occurrences, firstSeen, lastSeen, path, $project + '!' + path AS file,
          split(split($project, 'github.com/')[1], '@')[0] AS repository
     MATCH (f:GitFile {key: file})-[:HAS_BLAME]->(b:GitBlameRange)
     WHERE b.startLine <= line AND b.endLine >= line
     OPTIONAL MATCH (r:GitHubRepository {full_name: repository})-[:HAS_PULL_REQUEST]->(pr:GitHubPullRequest)-[:HAS_COMMIT]->(c:GitHubCommit)
     WHERE c.sha = b.sha
-    RETURN exception, message, frame, line, occurrences, firstSeen, lastSeen,
+    RETURN exception, message, occurrences, firstSeen, lastSeen, frame, path, line,
            b.shortSha AS commit, b.title AS change, b.authorName AS author, b.authorKind AS authorKind, b.authoredAt AS changedAt,
            b.boundary AS olderThanHistoryRead, pr.number AS pullRequest, pr.title AS pullRequestTitle, pr.html_url AS pullRequestUrl,
            b.sha AS sha, b.sourceUrl AS commitUrl
@@ -40,27 +50,61 @@
 - name: FailuresAndTheirChanges
   description: >-
     SELECT THIS for "what is failing and which changes are behind it", "the failures in the logs
-    with who last changed the code". Every failure the logs recorded that has a line in the
-    application's own code, each with the commit that last changed that line and who wrote it,
-    newest failure first. One read of the repository's history per file that failed. For the pull
-    request behind one of them, ask WhichChange with its fingerprint.
+    with who last changed the code". Every failure the logs recorded that has a line in this
+    repository, each with the commit that last changed that line and who wrote it, newest failure
+    first. A failure with no frame in the repository (another program's, or one thrown wholly
+    inside a library) is left out. For the pull request behind one of them, ask WhichChange with
+    its fingerprint.
   params:
     project: { type: string, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
-    sourceRoot: { type: string, default: "src/main/java", description: "Where the application's Java source sits in the repository." }
-    logs: { type: string, default: "", description: "Only the log files under this path, e.g. 'logs/shop'; empty for every log the world holds. Name the service's own logs: a failure from another program has no file in this repository." }
+    logs: { type: string, default: "", description: "Only the log files under this path, e.g. 'logs/shop'; empty for every log the world holds." }
     limit: { type: int, default: 25, description: "How many failures to return." }
   cypher: |
     MATCH (me:AssistantUser)-[:HAS_LOG_EVENT]->(e:LogEvent {hasTrace: true})
     WHERE $logs = '' OR e.path STARTS WITH $logs
     MATCH (e)-[:HAS_EXCEPTION]->(x:JavaThrowable {isRootCause: true})
-    WITH x.exception AS exception, x.message AS message, x.jarFrame AS frame, x.jarFrameLine AS line, x.sourceKey AS sourceKey,
-         count(e) AS occurrences, min(e.timestamp) AS firstSeen, max(e.timestamp) AS lastSeen
-    WITH exception, message, frame, line, occurrences, firstSeen, lastSeen,
-         $project + '!' + $sourceRoot + '/' + last(split(sourceKey, '!')) AS file
+    MATCH (e)-[:HAS_FRAME]->(fr:JavaStackFrame)
+    WHERE fr.exceptionIndex = x.index AND fr.sourcePath IS NOT NULL
+    WITH e.fingerprint AS fingerprint, x.exception AS exception, x.message AS message, fr.sourcePath AS sourcePath, fr.line AS line,
+         fr.frame AS depth, fr.className + '.' + fr.method AS frame,
+         count(DISTINCT e) AS occurrences, min(e.timestamp) AS firstSeen, max(e.timestamp) AS lastSeen
+    MATCH (cp:CodeProject {key: $project})-[:HAS_SOURCE]->(s:Source)
+    WHERE s.path = sourcePath OR s.path ENDS WITH '/' + sourcePath
+    WITH fingerprint, exception, message, frame, line, depth, occurrences, firstSeen, lastSeen, s.path AS path
+    ORDER BY depth
+    WITH fingerprint, head(collect({exception: exception, message: message, frame: frame, line: line, path: path,
+         occurrences: occurrences, firstSeen: firstSeen, lastSeen: lastSeen})) AS hit
+    WITH fingerprint, hit, hit.line AS line, $project + '!' + hit.path AS file
     MATCH (f:GitFile {key: file})-[:HAS_BLAME]->(b:GitBlameRange)
     WHERE b.startLine <= line AND b.endLine >= line
-    RETURN exception, message, frame, line, occurrences, firstSeen, lastSeen,
+    RETURN fingerprint, hit.exception AS exception, hit.message AS message, hit.frame AS frame, hit.path AS path, line,
+           hit.occurrences AS occurrences, hit.firstSeen AS firstSeen, hit.lastSeen AS lastSeen,
            b.shortSha AS commit, b.title AS change, b.authorName AS author, b.authorKind AS authorKind, b.authoredAt AS changedAt,
            b.boundary AS olderThanHistoryRead, b.sha AS sha, b.sourceUrl AS commitUrl
     ORDER BY lastSeen DESC
     LIMIT $limit
+
+- name: RunningVersions
+  description: >-
+    SELECT THIS for "which commit is running", "what version is deployed", "is my change live",
+    "how many pods run the new version". The pods of one application in a namespace, by the
+    version each says it runs: how many pods, how many ready, how many crash-looping, and the
+    COMMIT that version is, with its title, author and whether a coding agent helped. `project` is
+    the key the other views take. The version is the pod's app.kubernetes.io/version label, read
+    as the start of a commit id and found in the repository's history (the default branch, a year
+    back); `commit` is empty when the label is not a commit there.
+  params:
+    namespace: { type: string, description: "The namespace." }
+    app: { type: string, description: "The application: the pods' app label." }
+    repo: { type: string, description: "The GitHub repository as owner/repo." }
+  cypher: |
+    MATCH (n:KubeNamespace {name: $namespace})-[:HAS_POD]->(p:KubePod)
+    WHERE p.app = $app
+    WITH p.version AS version, count(p) AS pods, sum(CASE WHEN p.ready THEN 1 ELSE 0 END) AS ready,
+         sum(CASE WHEN p.crashLooping THEN 1 ELSE 0 END) AS crashLooping, sum(p.restarts) AS restarts
+    OPTIONAL MATCH (g:GitProject {key: 'https://github.com/' + $repo})-[:HAS_COMMIT]->(c:GitCommit)
+    WHERE version <> '' AND c.sha STARTS WITH version
+    RETURN version, pods, ready, crashLooping, restarts, c.sha AS commit, c.title AS change, c.authorName AS author,
+           c.authorKind AS authorKind, c.authoredAt AS changedAt, c.changeRequestNumber AS pullRequest,
+           CASE WHEN c.sha IS NULL THEN null ELSE 'https://github.com/' + $repo + '@' + c.sha END AS project
+    ORDER BY pods DESC
