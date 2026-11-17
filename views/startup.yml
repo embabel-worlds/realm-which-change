@@ -1,0 +1,50 @@
+# A failure at startup has no line of the application in its stack trace: every frame is Spring's
+# own. What Spring says instead is in the messages: the setting it could not resolve, and the bean
+# it was creating. This view reads those and finds the place in the repository that asks for the
+# setting, then the change that put it there.
+
+- name: StartupFailureCause
+  description: >-
+    SELECT THIS for "why won't the application start", "which change broke startup", "why is the
+    pod crash-looping", "could not resolve placeholder". A Spring application that failed to start
+    because a setting it needs was supplied by nothing: the setting, the bean Spring was creating,
+    the declaration in the repository that asks for the setting (`${...}`) with its file and line,
+    the commit that last changed that line, who wrote it and whether a coding agent helped
+    (authorKind), and the pull request that brought it in. `inFailingBean` is true when the
+    declaration is in the class of the bean the failure names: that row is the cause; other rows
+    are other places asking for the same setting. One failure by its fingerprint (from
+    JvmLogFailures), or every such failure in the logs. No rows means no logged failure is an
+    unresolved setting, or nothing in the repository at that commit asks for it.
+  params:
+    project: { type: string, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
+    fingerprint: { type: string, default: "", description: "One failure's fingerprint, from JvmLogFailures; empty for every startup failure of this kind." }
+  cypher: |
+    MATCH (me:AssistantUser)-[:HAS_LOG_EVENT]->(e:LogEvent {hasTrace: true})
+    WHERE $fingerprint = '' OR e.fingerprint = $fingerprint
+    MATCH (e)-[:HAS_EXCEPTION]->(x:JavaThrowable)
+    WITH e.fingerprint AS fingerprint, count(DISTINCT e) AS occurrences, min(e.timestamp) AS firstSeen, max(e.timestamp) AS lastSeen,
+         collect(DISTINCT x.message) AS messages
+    WITH fingerprint, occurrences, firstSeen, lastSeen,
+         head([m IN messages WHERE m CONTAINS "Could not resolve placeholder '" | split(m, "'")[1]]) AS setting,
+         head([m IN messages WHERE m CONTAINS "Error creating bean with name '" | split(m, "'")[1]]) AS bean,
+         head([m IN messages WHERE m CONTAINS '.class]' | replace(split(split(m, '.class]')[0], '[')[-1], '/', '.')]) AS beanClassFile
+    WHERE setting IS NOT NULL
+    MATCH (cp:CodeProject {key: $project})-[:DECLARES]->(d:SourceDeclaration)
+    WHERE d.text CONTAINS '${' + setting
+    WITH fingerprint, occurrences, firstSeen, lastSeen, setting, bean, beanClassFile, d,
+         toInteger(trim(split(head([l IN split(d.text, '\n') WHERE l CONTAINS '${' + setting]), ':')[0])) AS line
+    ORDER BY d.toLine - d.fromLine
+    WITH fingerprint, occurrences, firstSeen, lastSeen, setting, bean, beanClassFile, d.path AS path, line, head(collect(d)) AS d
+    WITH fingerprint, occurrences, firstSeen, lastSeen, setting, bean, d, path, line,
+         (beanClassFile IS NOT NULL AND beanClassFile ENDS WITH '.' + d.owner) AS inFailingBean,
+         $project + '!' + path AS file, split(split($project, 'github.com/')[1], '@')[0] AS repository
+    MATCH (f:GitFile {key: file})-[:HAS_BLAME]->(b:GitBlameRange)
+    WHERE b.startLine <= line AND b.endLine >= line
+    OPTIONAL MATCH (r:GitHubRepository {full_name: repository})-[:HAS_PULL_REQUEST]->(pr:GitHubPullRequest)-[:HAS_COMMIT]->(c:GitHubCommit)
+    WHERE c.sha = b.sha
+    RETURN fingerprint, setting, bean, inFailingBean, occurrences, firstSeen, lastSeen,
+           d.owner AS class, d.kind AS declared, d.name AS name, path, line,
+           b.shortSha AS commit, b.title AS change, b.authorName AS author, b.authorKind AS authorKind, b.authoredAt AS changedAt,
+           b.boundary AS olderThanHistoryRead, pr.number AS pullRequest, pr.title AS pullRequestTitle, pr.html_url AS pullRequestUrl,
+           b.sha AS sha, b.sourceUrl AS commitUrl
+    ORDER BY lastSeen DESC, inFailingBean DESC, path, line
