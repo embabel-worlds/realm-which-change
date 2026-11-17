@@ -1,0 +1,57 @@
+# The whole chain from the cluster, with nothing copied and nothing supplied by hand: the pods say
+# which commit they run, their logs are read from the cluster, and each failure is placed in the
+# repository at the commit that pod was running.
+
+- name: WhatBrokeInProduction
+  description: >-
+    SELECT THIS for "what is failing in production and which change caused it", "why are the pods
+    throwing errors", "which change broke the running service", "did an agent write the code that
+    is failing in production". The failures the pods of one application are logging now, including
+    what a crashed container wrote before it restarted, each traced to the method, file and line
+    in the repository AT THE COMMIT THAT POD RUNS, the commit that last changed that line, who
+    wrote it, whether a coding agent helped, and the pull request. Nothing is installed in the
+    application and nothing is copied: pods and logs are read from the cluster, the code from
+    the repository. A failure with no frame in the repository is left out (a failure wholly inside
+    a library, such as a startup failure in the framework).
+  params:
+    namespace: { type: string, description: "The namespace." }
+    app: { type: string, description: "The application: the pods' app label." }
+    repo: { type: string, description: "The GitHub repository as owner/repo." }
+  cypher: |
+    MATCH (n:KubeNamespace {name: $namespace})-[:HAS_POD]->(p:KubePod)
+    WHERE p.app = $app AND p.version <> ''
+    MATCH (g:GitProject {key: 'https://github.com/' + $repo})-[:HAS_COMMIT]->(rc:GitCommit)
+    WHERE rc.sha STARTS WITH p.version
+    WITH p, rc.sha AS running
+    CALL {
+      WITH p MATCH (p)-[:HAS_LOG_EVENT]->(e:KubeLogEvent {hasTrace: true}) RETURN e
+      UNION
+      WITH p MATCH (p)-[:HAS_PREVIOUS_LOG_EVENT]->(e:KubeLogEvent {hasTrace: true}) RETURN e
+    }
+    MATCH (e)-[:THREW]->(x:PodJavaThrowable {isRootCause: true})
+    MATCH (e)-[:AT_FRAME]->(fr:PodJavaStackFrame)
+    WHERE fr.exceptionIndex = x.index AND fr.sourcePath IS NOT NULL
+    WITH running, e.fingerprint AS fingerprint, x.exception AS exception, x.message AS message,
+         fr.sourcePath AS sourcePath, fr.line AS line, fr.frame AS depth, fr.className + '.' + fr.method AS frame,
+         count(DISTINCT e) AS occurrences, count(DISTINCT p.name) AS pods, collect(DISTINCT e.container) AS containers,
+         max(e.timestamp) AS lastSeen
+    WITH running, fingerprint, exception, message, sourcePath, line, depth, frame, occurrences, pods, containers, lastSeen,
+         'https://github.com/' + $repo + '@' + running AS project
+    MATCH (cp:CodeProject {key: project})-[:HAS_SOURCE]->(s:Source)
+    WHERE s.path = sourcePath OR s.path ENDS WITH '/' + sourcePath
+    WITH running, project, fingerprint, exception, message, frame, line, depth, occurrences, pods, containers, lastSeen, s.path AS path
+    ORDER BY depth
+    WITH running, project, fingerprint, head(collect({exception: exception, message: message, frame: frame, line: line, path: path,
+         occurrences: occurrences, pods: pods, containers: containers, lastSeen: lastSeen})) AS hit
+    WITH running, fingerprint, hit, hit.line AS line, project + '!' + hit.path AS file
+    MATCH (f:GitFile {key: file})-[:HAS_BLAME]->(b:GitBlameRange)
+    WHERE b.startLine <= line AND b.endLine >= line
+    OPTIONAL MATCH (r:GitHubRepository {full_name: $repo})-[:HAS_PULL_REQUEST]->(pr:GitHubPullRequest)-[:HAS_COMMIT]->(c:GitHubCommit)
+    WHERE c.sha = b.sha
+    RETURN hit.exception AS exception, hit.message AS message, hit.occurrences AS occurrences, hit.pods AS pods,
+           hit.containers AS containers, hit.lastSeen AS lastSeen, substring(running, 0, 12) AS runningCommit,
+           hit.frame AS frame, hit.path AS path, line,
+           b.shortSha AS commit, b.title AS change, b.authorName AS author, b.authorKind AS authorKind, b.authoredAt AS changedAt,
+           b.boundary AS olderThanHistoryRead, pr.number AS pullRequest, pr.title AS pullRequestTitle, pr.html_url AS pullRequestUrl,
+           fingerprint
+    ORDER BY occurrences DESC
