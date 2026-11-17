@@ -1,5 +1,7 @@
 # realm-which-change
 
+> **Experimental.** This realm is new and still changing: types, views and parameters may change without notice, and it has been run on few systems. Check its answers before relying on them.
+
 Which change broke production? One query from a failure in a Java service's logs to:
 
 - the method and line in the application that threw it;
