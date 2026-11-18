@@ -1,0 +1,19 @@
+# A call in Java source, by name: enough to say "this method calls something named send on
+# this.reminders". Read from the repository at a commit; no jar, so nothing is resolved to a class.
+
+- name: JavaSourceCall
+  visibility: internal
+  userAnchor: false
+  description: "A call in a Java file: the called name (`method`), what it is called on (`receiver`), and the method it is in (`enclosing`), with its file and line. Matched by NAME only: say 'calls something named X', never that it calls a particular X. Reach it from (:CodeProject {key})-[:CALLS_IN_JAVA]->."
+  virtualJoins:
+    - { anchorLabel: CodeProject, relationship: CALLS_IN_JAVA, keyField: key, recordKeyField: anchorKey, producer: javaSourceCalls, maxFanoutTotal: 200000,
+        description: "(:CodeProject {key:$project})-[:CALLS_IN_JAVA]->(x:JavaSourceCall)" }
+  properties:
+    id: { identity: true, description: "Identity." }
+    path: "File path, relative to the project."
+    line: { type: int, description: "Line it is on." }
+    method: "The called name."
+    receiver: "What it is called on, as written."
+    arguments: "The arguments, as written."
+    enclosing: "The method the call is in."
+    url: "The line on the repository's host."

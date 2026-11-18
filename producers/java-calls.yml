@@ -1,0 +1,2 @@
+# The calls in a project's Java source, read with tree-sitter and matched by name. No jar is needed.
+- { name: javaSourceCalls, kind: source-tree, emit: calls, languages: [java] }
