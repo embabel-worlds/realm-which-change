@@ -61,3 +61,68 @@
            b.boundary AS olderThanHistoryRead, pr.number AS pullRequest, pr.title AS pullRequestTitle, pr.html_url AS pullRequestUrl,
            failure
     ORDER BY occurrences DESC
+
+- name: StartupFailureFromLogs
+  description: >-
+    SELECT THIS for "why won't the application start", "which change broke startup", "why is the
+    pod crash-looping" when the service's logs are shipped to Elasticsearch. A Spring application
+    that failed to start because a setting it needs was supplied by nothing, read from the log
+    store (so it still answers after the crashed pod is gone): the setting, the bean Spring was
+    creating, the declaration in the repository that asks for the setting (`${...}`) with its file
+    and line AT THE COMMIT THAT WAS RUNNING, the commit that last changed that line, who wrote it
+    and whether a coding agent helped, and the pull request. `occurrences` counts every logged
+    occurrence in the window. `inFailingBean` is true when the declaration is in the class of the
+    bean the failure names: that row is the cause. No rows means no failure in the window is an
+    unresolved setting, or nothing in the repository at that commit asks for it.
+  params:
+    service: { type: string, description: "The service: the app label, deployment or service name its log events carry." }
+    repo: { type: string, description: "The GitHub repository as owner/repo." }
+    window: { type: string, default: "day", description: "hour, day or week." }
+  cypher: |
+    MATCH (s:LoggedService {key: $service})
+    CALL {
+      WITH s WITH s WHERE $window = 'hour'
+      MATCH (s)-[h:FAILED_LAST_HOUR]->(fh:LoggedFailure)-[:NEWEST_TRACE]->(th:LoggedTrace)
+      RETURN th AS t, fh.failure AS failure, h.occurrences AS occurrences, h.pods AS pods, h.versions AS versions, h.lastSeenAt AS lastSeen
+      UNION
+      WITH s WITH s WHERE $window = 'day'
+      MATCH (s)-[d:FAILED_LAST_DAY]->(fd:LoggedFailure)-[:NEWEST_TRACE]->(td:LoggedTrace)
+      RETURN td AS t, fd.failure AS failure, d.occurrences AS occurrences, d.pods AS pods, d.versions AS versions, d.lastSeenAt AS lastSeen
+      UNION
+      WITH s WITH s WHERE $window = 'week'
+      MATCH (s)-[w:FAILED_LAST_WEEK]->(fw:LoggedFailure)-[:NEWEST_TRACE]->(tw:LoggedTrace)
+      RETURN tw AS t, fw.failure AS failure, w.occurrences AS occurrences, w.pods AS pods, w.versions AS versions, w.lastSeenAt AS lastSeen
+    }
+    WITH t, failure, occurrences, pods, lastSeen, head(versions) AS version
+    WHERE version IS NOT NULL AND failure CONTAINS 'PlaceholderResolutionException'
+    MATCH (g:GitProject {key: 'https://github.com/' + $repo})-[:HAS_COMMIT]->(rc:GitCommit)
+    WHERE rc.sha STARTS WITH version
+    WITH t, failure, occurrences, pods, lastSeen, rc.sha AS running
+    MATCH (t:LoggedTrace)-[:THREW]->(x:LoggedJavaThrowable)
+    WITH running, failure, occurrences, pods, lastSeen, collect(DISTINCT x.message) AS messages
+    WITH running, failure, occurrences, pods, lastSeen,
+         head([m IN messages WHERE m CONTAINS "Could not resolve placeholder '" | split(m, "'")[1]]) AS setting,
+         head([m IN messages WHERE m CONTAINS "Error creating bean with name '" | split(m, "'")[1]]) AS bean,
+         head([m IN messages WHERE m CONTAINS '.class]' | replace(split(split(m, '.class]')[0], '[')[-1], '/', '.')]) AS beanClassFile
+    WHERE setting IS NOT NULL
+    WITH running, failure, occurrences, pods, lastSeen, setting, bean, beanClassFile,
+         'https://github.com/' + $repo + '@' + running AS project
+    MATCH (cp:CodeProject {key: project})-[:DECLARES]->(decl:SourceDeclaration)
+    WHERE decl.text CONTAINS '${' + setting
+    WITH running, project, failure, occurrences, pods, lastSeen, setting, bean, beanClassFile, decl,
+         toInteger(trim(split(head([l IN split(decl.text, '\n') WHERE l CONTAINS '${' + setting]), ':')[0])) AS line
+    ORDER BY decl.toLine - decl.fromLine
+    WITH running, project, failure, occurrences, pods, lastSeen, setting, bean, beanClassFile, decl.path AS path, line, head(collect(decl)) AS decl
+    WITH running, failure, occurrences, pods, lastSeen, setting, bean, decl, path, line,
+         (beanClassFile IS NOT NULL AND beanClassFile ENDS WITH '.' + decl.owner) AS inFailingBean,
+         project + '!' + path AS file
+    MATCH (gf:GitFile {key: file})-[:HAS_BLAME]->(b:GitBlameRange)
+    WHERE b.startLine <= line AND b.endLine >= line
+    OPTIONAL MATCH (r:GitHubRepository {full_name: $repo})-[:HAS_PULL_REQUEST]->(pr:GitHubPullRequest)-[:HAS_COMMIT]->(c:GitHubCommit)
+    WHERE c.sha = b.sha
+    RETURN setting, bean, inFailingBean, occurrences, pods, lastSeen, substring(running, 0, 12) AS runningCommit,
+           decl.owner AS class, path, line,
+           b.shortSha AS commit, b.title AS change, b.authorName AS author, b.authorKind AS authorKind, b.authoredAt AS changedAt,
+           b.boundary AS olderThanHistoryRead, pr.number AS pullRequest, pr.title AS pullRequestTitle, pr.html_url AS pullRequestUrl,
+           failure
+    ORDER BY inFailingBean DESC, lastSeen DESC, path, line
