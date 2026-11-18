@@ -7,7 +7,7 @@
 <script src="/api/v1/apps-runtime/v1/embabel.js"></script>
 <script src="/api/v1/apps-runtime/gateway.js"></script>
 <script type="application/embabel-app+json">
-{"version":1,"name":"which-change-setup","requires":{"lenses":[],"views":["RunningVersions","LogStoreCoverage","KubeLogFailures","WatchedServices","WhatBrokeInProduction"],"realms":["realm-which-change","realm-kubernetes","realm-elastic-logs","realm-git"],"namespaces":["repository"]}}
+{"version":1,"name":"which-change-setup","requires":{"lenses":[],"views":["RunningVersions","LogStoreCoverage","KubeLogFailures","WatchedServices","WhatBrokeInProduction","WhatBrokeFromLogs","StartupFailureFromLogs"],"realms":["realm-which-change","realm-kubernetes","realm-elastic-logs","realm-git"],"namespaces":["repository"]}}
 </script>
 <style>
   :root{--bg:#0b0d10;--surface:#12161b;--surface2:#171c22;--border:#232a33;--text:#e6e9ee;--dim:#8b95a3;
@@ -83,7 +83,7 @@
     <h3>What this page writes</h3>
     <p>Two things, both into this appliance and nowhere else. A credential you enter is sent to the appliance's own keys store, which checks it where it can and refuses a value the source rejects; it is stored encrypted and no response carries it back. A service you save becomes a <span class="mono">WatchedService</span> entry in this world: a namespace, an app label and a repository name.</p>
     <h3>What the checks read</h3>
-    <p><b>Pods and the commit they run</b>: the cluster's API lists the pods with that app label, and each pod's version label is looked up as the start of a commit id in the repository's history (<span class="mono">RunningVersions</span>). <b>Logs</b>: the log store is asked how many events it holds for the service in the last 7 days and how many carry a stack trace (<span class="mono">LogStoreCoverage</span>); with no log store, the pods' own logs are read (<span class="mono">KubeLogFailures</span>), which reach back only a few thousand lines per pod. <b>The trace</b>: <span class="mono">WhatBrokeInProduction</span> goes from each failure to the line that threw it, the commit that last changed the line, and its pull request.</p>
+    <p><b>Pods and the commit they run</b>: the cluster's API lists the pods with that app label, and each pod's version label is looked up as the start of a commit id in the repository's history (<span class="mono">RunningVersions</span>). <b>Logs</b>: the log store is asked how many events it holds for the service in the last 7 days and how many carry a stack trace (<span class="mono">LogStoreCoverage</span>); with no log store, the pods' own logs are read (<span class="mono">KubeLogFailures</span>), which reach back only a few thousand lines per pod. <b>The trace</b>: <span class="mono">WhatBrokeInProduction</span> goes from each failure in the pods' logs to the line that threw it, the commit that last changed the line, and its pull request. Where the logs are in the log store, <span class="mono">WhatBrokeFromLogs</span> does the same from there, with every occurrence of the last 7 days counted and the newest one read for its stack trace, and <span class="mono">StartupFailureFromLogs</span> places a failure to start (which has no line of the application in its trace) at the declaration that asks for the missing setting.</p>
     <h3>What a failed check means</h3>
     <p>"No pods" means no pod in that namespace carries that app label: check the label with <span class="mono">kubectl get pods --show-labels</span>. "The version is not a commit" means the pods' <span class="mono">app.kubernetes.io/version</span> label is not the start of a commit id in the repository: build images so the label carries the commit. "No log events" means nothing is shipped under that service name. An error from a source is shown as that source's error, never as an empty result.</p>
     <h3>What the appliance did here</h3>
@@ -232,17 +232,29 @@
       return '<tr><td class="mono">' + esc(w.key) + '</td><td class="mono">' + esc(w.repo) + '</td><td>' + esc(w.logs === 'log store' ? 'the log store' : 'the cluster') + '</td><td><button data-broke="' + i + '">What broke?</button></td></tr>';
     }).join('') + '</tbody></table>';
   }
+  function changeCell(r) {
+    return '<td><span class="mono">' + esc(r.commit) + '</span> ' + esc(r.change) + '<div class="desc">' + esc(r.author) + (r.authorKind && r.authorKind !== 'human' ? ' <span class="pill p-amber">with a coding agent</span>' : '') +
+      (r.pullRequest ? ' · <a href="' + esc(r.pullRequestUrl || '#') + '" target="_blank" rel="noopener">pull request #' + esc(r.pullRequest) + '</a>' : '') + '</div></td>';
+  }
+  function times(r) { return r.occurrences + ' time' + (r.occurrences === 1 ? '' : 's') + ' on ' + r.pods + ' pod' + (r.pods === 1 ? '' : 's'); }
   function broke(i) {
-    var w = state.watched[i];
+    var w = state.watched[i], store = w.logs === 'log store';
+    var from = store ? 'the log store over the last 7 days' : esc(w.key) + '\'s pod logs';
     $('broke').innerHTML = '<div class="card"><div class="state">Tracing ' + esc(w.key) + '\'s failures to the changes behind them. The first read of a repository takes up to a minute.</div></div>';
-    view('WhatBrokeInProduction', { namespace: w.namespace, app: w.app, repo: w.repo }).then(function (rows) {
-      if (!rows.length) { $('broke').innerHTML = '<div class="card"><div class="state">No failure in ' + esc(w.key) + '\'s pod logs has a line in ' + esc(w.repo) + ' at the commit that is running.</div></div>'; return; }
-      $('broke').innerHTML = '<div class="card"><div class="sub">' + rows.length + ' failure' + (rows.length === 1 ? '' : 's') + ' in ' + esc(w.key) + '\'s pod logs with a line in the repository, most frequent first. The change is the one that last touched the line: the place to look first, not proof of cause.</div>' +
-        '<table><thead><tr><th>Failure</th><th>Where</th><th>Change</th></tr></thead><tbody>' + rows.map(function (r) {
-          return '<tr><td><b>' + esc(String(r.exception).split('.').pop()) + '</b> <span class="dim">' + r.occurrences + ' time' + (r.occurrences === 1 ? '' : 's') + ' on ' + r.pods + ' pod' + (r.pods === 1 ? '' : 's') + '</span><div class="desc">' + esc(r.message) + '</div></td>' +
-            '<td class="mono">' + esc(String(r.path).split('/').pop()) + ':' + esc(r.line) + '<div class="desc">running ' + esc(r.runningCommit) + '</div></td>' +
-            '<td><span class="mono">' + esc(r.commit) + '</span> ' + esc(r.change) + '<div class="desc">' + esc(r.author) + (r.authorKind && r.authorKind !== 'human' ? ' <span class="pill p-amber">with a coding agent</span>' : '') +
-            (r.pullRequest ? ' · <a href="' + esc(r.pullRequestUrl || '#') + '" target="_blank" rel="noopener">pull request #' + esc(r.pullRequest) + '</a>' : '') + '</div></td></tr>';
+    /* From the log store: failures with a line of the application, and startup failures, which have none. */
+    var q = store
+      ? Promise.all([view('WhatBrokeFromLogs', { service: w.app, repo: w.repo, window: 'week' }), view('StartupFailureFromLogs', { service: w.app, repo: w.repo, window: 'week' })])
+      : view('WhatBrokeInProduction', { namespace: w.namespace, app: w.app, repo: w.repo }).then(function (rows) { return [rows, []]; });
+    q.then(function (both) {
+      var rows = both[0], starts = both[1].filter(function (r) { return r.inFailingBean; }), n = rows.length + starts.length;
+      if (!n) { $('broke').innerHTML = '<div class="card"><div class="state">No failure in ' + from + ' has a line in ' + esc(w.repo) + ' at the commit that was running.</div></div>'; return; }
+      $('broke').innerHTML = '<div class="card"><div class="sub">' + n + ' failure' + (n === 1 ? '' : 's') + ' in ' + from + ' with a line in the repository' + (store ? ', counted over every logged event' : '') + ', most frequent first. The change is the one that last touched the line: the place to look first, not proof of cause.</div>' +
+        '<table><thead><tr><th>Failure</th><th>Where</th><th>Change</th></tr></thead><tbody>' + starts.map(function (r) {
+          return '<tr><td><b>Failed to start</b> <span class="dim">' + times(r) + '</span><div class="desc">Nothing supplies the setting <span class="mono">' + esc(r.setting) + '</span>, which the bean <span class="mono">' + esc(r.bean) + '</span> needs.</div></td>' +
+            '<td class="mono">' + esc(String(r.path).split('/').pop()) + ':' + esc(r.line) + '<div class="desc">running ' + esc(r.runningCommit) + '</div></td>' + changeCell(r) + '</tr>';
+        }).join('') + rows.map(function (r) {
+          return '<tr><td><b>' + esc(String(r.exception).split('.').pop()) + '</b> <span class="dim">' + times(r) + '</span><div class="desc">' + esc(r.message) + '</div></td>' +
+            '<td class="mono">' + esc(String(r.path).split('/').pop()) + ':' + esc(r.line) + '<div class="desc">running ' + esc(r.runningCommit) + '</div></td>' + changeCell(r) + '</tr>';
         }).join('') + '</tbody></table></div>';
     }).catch(function (e) { $('broke').innerHTML = '<div class="card"><div class="state err">The trace could not be run: ' + words(e) + '</div></div>'; });
   }

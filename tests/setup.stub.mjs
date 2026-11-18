@@ -14,7 +14,8 @@ const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'ut
 const fix = (n) => JSON.parse(read(`./fixtures/${n}.json`));
 const html = read('../apps/setup.html');
 const coverage = existsSync(fileURLToPath(new URL('./fixtures/LogStoreCoverage.json', import.meta.url))) ? fix('LogStoreCoverage') : null;
-const FIX = { RunningVersions: fix('RunningVersions'), KubeLogFailures: fix('KubeLogFailures'), WhatBrokeInProduction: fix('WhatBrokeInProduction'), LogStoreCoverage: coverage };
+const FIX = { RunningVersions: fix('RunningVersions'), KubeLogFailures: fix('KubeLogFailures'), WhatBrokeInProduction: fix('WhatBrokeInProduction'), LogStoreCoverage: coverage,
+  WhatBrokeFromLogs: fix('WhatBrokeFromLogs'), StartupFailureFromLogs: fix('StartupFailureFromLogs') };
 const KEYS = fix('keys');
 const URL_ = 'http://world.test/apps/which-change/setup.html';
 
@@ -136,6 +137,18 @@ try {
     await page.locator('#saveBtn').click();
     await page.waitForFunction(() => window.__entries.length === 1);
     ok((await page.evaluate(() => window.__entries[0].data.logs)) === 'log store', 'and the entry records that logs come from the log store');
+    await page.waitForFunction(() => document.querySelector('#watched table'));
+    await page.locator('[data-broke]').click();
+    await page.waitForSelector('#broke table');
+    const lb = FIX.WhatBrokeFromLogs.rows[0], sb = FIX.StartupFailureFromLogs.rows.filter(r => r.inFailingBean), text = await page.locator('#broke').innerText();
+    const calls = await page.evaluate(() => window.__views);
+    ok(calls.some(c => c.startsWith('WhatBrokeFromLogs:') && c.includes('"service":"petclinic"') && c.includes('"window":"week"')) && !calls.some(c => c.startsWith('WhatBrokeInProduction:')),
+       'what broke is asked of the log store, not the pods');
+    ok(await page.locator('#broke tbody tr').count() === FIX.WhatBrokeFromLogs.rows.length + sb.length, 'one row per failure: ' + FIX.WhatBrokeFromLogs.rows.length + ' with a line, ' + sb.length + ' at startup');
+    ok(text.includes(lb.commit) && text.includes('pull request #' + lb.pullRequest) && text.includes(lb.occurrences + ' times on ' + lb.pods + ' pods') && text.includes('with a coding agent'), 'the failure with a line: its count, change and pull request');
+    ok(text.includes('Failed to start') && text.includes(sb[0].setting) && text.includes(sb[0].commit) && text.includes('pull request #' + sb[0].pullRequest) && text.includes(sb[0].occurrences + ' times on 1 pod'), 'the startup failure: the missing setting, its count, change and pull request');
+    ok(text.includes('counted over every logged event') && text.includes('the log store over the last 7 days'), 'the count says what it counts');
+    ok(errors.length === 0, 'no console errors with the log store' + (errors.length ? ': ' + errors.join(' | ') : ''));
     await page.close();
   }
 
