@@ -1,0 +1,106 @@
+# The Spring reading of a pool that ran out. The request that logs "Connection is not available" is
+# a victim: it waited for a connection somebody else held. The cause is a transaction that keeps its
+# connection while it waits on something slow, and that is in the code, not in the stack trace.
+
+- name: ConnectionHeldAcrossRemoteCall
+  description: >-
+    SELECT THIS for "which transactions hold a database connection across a remote call", "why
+    does the connection pool run out", "is there an HTTP call inside a transaction". Every
+    @Transactional method in the project's main source that calls, through a field, a class of the
+    project that makes an HTTP call: the method, the line of the call, the class it goes through
+    and where that class calls its HTTP client, with the commit that last changed the calling line,
+    who wrote it, whether a coding agent helped, and the pull request. A transaction takes its
+    connection when it starts and keeps it until it ends, so every such method holds a connection
+    for as long as the remote service takes to answer. Read from source at the given commit: calls
+    are matched by the field's declared type and the called method's name, one class deep. It
+    reads @Transactional on methods (not on a class), and these HTTP clients: java.net.http
+    HttpClient, RestClient, RestTemplate, WebClient, OkHttp and Apache HttpClient. No rows means
+    none was found within those limits, not that there is none.
+  params:
+    project: { type: string, description: "The repository at a commit: 'https://github.com/owner/repo@<full sha>'." }
+  cypher: |
+    MATCH (p:JavaProject {key: $project})-[:HAS_ANNOTATION]->(a:JavaProjectAnnotation)
+    WHERE a.name = 'Transactional' AND a.targetKind = 'method' AND NOT a.path CONTAINS 'src/test/'
+    MATCH (p)-[:DECLARES_MEMBER]->(f:JavaProjectMember {kind: 'field'})
+    WHERE f.owner = a.owner
+    MATCH (cp:CodeProject {key: $project})-[:CALLS_IN_JAVA]->(c:JavaSourceCall)
+    WHERE c.path = a.path AND c.enclosing = a.targetName AND (c.receiver = 'this.' + f.name OR c.receiver = f.name)
+    WITH p, cp, a, f, c
+    MATCH (p)-[:DECLARES_MEMBER]->(rf:JavaProjectMember {kind: 'field'})
+    WHERE rf.owner = f.type AND rf.type IN ['java.net.http.HttpClient', 'org.springframework.web.client.RestClient', 'org.springframework.web.client.RestTemplate', 'org.springframework.web.client.RestOperations', 'org.springframework.web.reactive.function.client.WebClient', 'okhttp3.OkHttpClient', 'org.apache.hc.client5.http.classic.HttpClient', 'org.apache.hc.client5.http.impl.classic.CloseableHttpClient', 'org.apache.http.client.HttpClient']
+    MATCH (cp)-[:CALLS_IN_JAVA]->(rc:JavaSourceCall)
+    WHERE rc.path = rf.path AND rc.enclosing = c.method AND (rc.receiver = 'this.' + rf.name OR rc.receiver = rf.name)
+    WITH a, f, c, rf, min(rc.line) AS remoteLine, $project + '!' + a.path AS file
+    MATCH (gf:GitFile {key: file})-[:HAS_BLAME]->(b:GitBlameRange)
+    WHERE b.startLine <= c.line AND b.endLine >= c.line
+    WITH a, f, c, rf, remoteLine, b, split(split($project, 'github.com/')[1], '@')[0] AS repository
+    OPTIONAL MATCH (r:GitHubRepository {full_name: repository})-[:HAS_PULL_REQUEST]->(pr:GitHubPullRequest)-[:HAS_COMMIT]->(gc:GitHubCommit)
+    WHERE gc.sha = b.sha
+    RETURN last(split(a.owner, '.')) AS class, a.targetName AS method, a.path AS path, a.line AS transactionAt,
+           c.line AS line, c.receiver + '.' + c.method AS call, last(split(f.type, '.')) AS through,
+           last(split(rf.path, '/')) + ':' + toString(remoteLine) AS remoteCallAt, last(split(rf.type, '.')) AS client,
+           b.shortSha AS commit, b.title AS change, b.authorName AS author, b.authorKind AS authorKind, b.authoredAt AS changedAt,
+           b.boundary AS olderThanHistoryRead, pr.number AS pullRequest, pr.title AS pullRequestTitle, pr.html_url AS pullRequestUrl
+    ORDER BY path, line
+
+- name: PoolExhaustionCause
+  description: >-
+    SELECT THIS for "why did the connection pool run out", "what caused 'Connection is not
+    available, request timed out'", "which change exhausted the database pool", when the
+    service's logs are shipped to Elasticsearch. When the log store holds pool-timeout failures
+    (SQLTransientConnectionException) for the service in the window (hour, day or week): how many,
+    on how many pods, at which running commit, and every @Transactional method AT THAT COMMIT that
+    holds its connection across an HTTP call, with the line of the call, the commit that last
+    changed it, who wrote it, whether a coding agent helped, and the pull request. The failing
+    requests in the logs are victims and are not blamed. The method is a candidate established
+    from the code, not from a measurement of which transaction was holding connections at the
+    time. No rows means no pool timeout was logged in the window, or no such method was found
+    (see ConnectionHeldAcrossRemoteCall for what is read).
+  params:
+    service: { type: string, description: "The service: the app label, deployment or service name its log events carry." }
+    repo: { type: string, description: "The GitHub repository as owner/repo." }
+    window: { type: string, default: "day", description: "hour, day or week." }
+  cypher: |
+    MATCH (s:LoggedService {key: $service})
+    CALL {
+      WITH s WITH s WHERE $window = 'hour'
+      MATCH (s)-[h:FAILED_LAST_HOUR]->(fh:LoggedFailure)
+      RETURN fh.failure AS failure, h.occurrences AS occurrences, h.pods AS pods, h.versions AS versions, h.lastSeenAt AS lastSeen
+      UNION
+      WITH s WITH s WHERE $window = 'day'
+      MATCH (s)-[d:FAILED_LAST_DAY]->(fd:LoggedFailure)
+      RETURN fd.failure AS failure, d.occurrences AS occurrences, d.pods AS pods, d.versions AS versions, d.lastSeenAt AS lastSeen
+      UNION
+      WITH s WITH s WHERE $window = 'week'
+      MATCH (s)-[w:FAILED_LAST_WEEK]->(fw:LoggedFailure)
+      RETURN fw.failure AS failure, w.occurrences AS occurrences, w.pods AS pods, w.versions AS versions, w.lastSeenAt AS lastSeen
+    }
+    WITH failure, occurrences, pods, lastSeen, head(versions) AS version
+    WHERE version IS NOT NULL AND failure STARTS WITH 'java.sql.SQLTransientConnectionException'
+    WITH version, sum(occurrences) AS poolTimeouts, max(pods) AS pods, max(lastSeen) AS lastSeen
+    MATCH (g:GitProject {key: 'https://github.com/' + $repo})-[:HAS_COMMIT]->(rc0:GitCommit)
+    WHERE rc0.sha STARTS WITH version
+    WITH poolTimeouts, pods, lastSeen, rc0.sha AS running, 'https://github.com/' + $repo + '@' + rc0.sha AS project
+    MATCH (p:JavaProject {key: project})-[:HAS_ANNOTATION]->(a:JavaProjectAnnotation)
+    WHERE a.name = 'Transactional' AND a.targetKind = 'method' AND NOT a.path CONTAINS 'src/test/'
+    MATCH (p)-[:DECLARES_MEMBER]->(f:JavaProjectMember {kind: 'field'})
+    WHERE f.owner = a.owner
+    MATCH (cp:CodeProject {key: project})-[:CALLS_IN_JAVA]->(c:JavaSourceCall)
+    WHERE c.path = a.path AND c.enclosing = a.targetName AND (c.receiver = 'this.' + f.name OR c.receiver = f.name)
+    WITH poolTimeouts, pods, lastSeen, running, project, p, cp, a, f, c
+    MATCH (p)-[:DECLARES_MEMBER]->(rf:JavaProjectMember {kind: 'field'})
+    WHERE rf.owner = f.type AND rf.type IN ['java.net.http.HttpClient', 'org.springframework.web.client.RestClient', 'org.springframework.web.client.RestTemplate', 'org.springframework.web.client.RestOperations', 'org.springframework.web.reactive.function.client.WebClient', 'okhttp3.OkHttpClient', 'org.apache.hc.client5.http.classic.HttpClient', 'org.apache.hc.client5.http.impl.classic.CloseableHttpClient', 'org.apache.http.client.HttpClient']
+    MATCH (cp)-[:CALLS_IN_JAVA]->(rc:JavaSourceCall)
+    WHERE rc.path = rf.path AND rc.enclosing = c.method AND (rc.receiver = 'this.' + rf.name OR rc.receiver = rf.name)
+    WITH poolTimeouts, pods, lastSeen, running, project, a, f, c, rf, min(rc.line) AS remoteLine, project + '!' + a.path AS file
+    MATCH (gf:GitFile {key: file})-[:HAS_BLAME]->(b:GitBlameRange)
+    WHERE b.startLine <= c.line AND b.endLine >= c.line
+    OPTIONAL MATCH (r:GitHubRepository {full_name: $repo})-[:HAS_PULL_REQUEST]->(pr:GitHubPullRequest)-[:HAS_COMMIT]->(gc:GitHubCommit)
+    WHERE gc.sha = b.sha
+    RETURN poolTimeouts, pods, lastSeen, substring(running, 0, 12) AS runningCommit,
+           last(split(a.owner, '.')) AS class, a.targetName AS method, a.path AS path, a.line AS transactionAt,
+           c.line AS line, c.receiver + '.' + c.method AS call, last(split(f.type, '.')) AS through,
+           last(split(rf.path, '/')) + ':' + toString(remoteLine) AS remoteCallAt, last(split(rf.type, '.')) AS client,
+           b.shortSha AS commit, b.title AS change, b.authorName AS author, b.authorKind AS authorKind, b.authoredAt AS changedAt,
+           b.boundary AS olderThanHistoryRead, pr.number AS pullRequest, pr.title AS pullRequestTitle, pr.html_url AS pullRequestUrl
+    ORDER BY path, line

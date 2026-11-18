@@ -12,7 +12,8 @@
     wrote it, whether a coding agent helped, and the pull request. Nothing is installed in the
     application and nothing is copied: pods and logs are read from the cluster, the code from
     the repository. A failure with no frame in the repository is left out (a failure wholly inside
-    a library, such as a startup failure in the framework).
+    a library, such as a startup failure in the framework). A database pool timeout is left out
+    too: the request that logs it is a victim, not the cause; ask PoolExhaustionCause.
   params:
     namespace: { type: string, description: "The namespace." }
     app: { type: string, description: "The application: the pods' app label." }
@@ -30,7 +31,7 @@
     }
     MATCH (e:KubeLogEvent)-[:THREW]->(x:PodJavaThrowable {isRootCause: true})
     MATCH (e:KubeLogEvent)-[:AT_FRAME]->(fr:PodJavaStackFrame)
-    WHERE fr.exceptionIndex = x.index AND fr.sourcePath IS NOT NULL
+    WHERE fr.exceptionIndex = x.index AND fr.sourcePath IS NOT NULL AND x.exception <> 'java.sql.SQLTransientConnectionException'
     WITH running, e.fingerprint AS fingerprint, x.exception AS exception, x.message AS message,
          fr.sourcePath AS sourcePath, fr.line AS line, fr.frame AS depth, fr.className + '.' + fr.method AS frame,
          count(DISTINCT e) AS occurrences, count(DISTINCT p.name) AS pods, collect(DISTINCT e.container) AS containers,

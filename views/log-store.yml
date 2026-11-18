@@ -12,7 +12,8 @@
     coding agent helped, and the pull request. The running commit is the version label on the
     log events; where a failure occurred at more than one version, the most frequent is used and
     `versions` lists them all. Nothing is installed in the application. A failure with no frame
-    in the repository is left out (a failure wholly inside a library).
+    in the repository is left out (a failure wholly inside a library). A database pool timeout is
+    left out too: the request that logs it is a victim, not the cause; ask PoolExhaustionCause.
   params:
     service: { type: string, description: "The service: the app label, deployment or service name its log events carry." }
     repo: { type: string, description: "The GitHub repository as owner/repo." }
@@ -33,7 +34,7 @@
       RETURN tw AS t, fw.failure AS failure, w.occurrences AS occurrences, w.pods AS pods, w.versions AS versions, w.lastSeenAt AS lastSeen
     }
     WITH t, failure, occurrences, pods, versions, lastSeen, head(versions) AS version
-    WHERE version IS NOT NULL
+    WHERE version IS NOT NULL AND NOT failure STARTS WITH 'java.sql.SQLTransientConnectionException'
     MATCH (g:GitProject {key: 'https://github.com/' + $repo})-[:HAS_COMMIT]->(rc:GitCommit)
     WHERE rc.sha STARTS WITH version
     WITH t, failure, occurrences, pods, versions, lastSeen, rc.sha AS running
