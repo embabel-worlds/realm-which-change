@@ -2,13 +2,13 @@
 # producers from the newest occurrence's text. realm-elastic-logs knows no language; these two types
 # are what a Java trace in one says. No jar is read.
 #
-#   LoggedFailure ─THREW▶ LoggedJavaThrowable
-#                 ─AT_FRAME▶ LoggedJavaStackFrame
+#   LoggedFailure ─NEWEST_TRACE▶ LoggedTrace ─THREW▶ LoggedJavaThrowable
+#                                            ─AT_FRAME▶ LoggedJavaStackFrame
 
 - name: LoggedJavaThrowable
   visibility: internal
   userAnchor: false
-  description: "One throwable in the Java stack trace of a failure counted in the log store: the one thrown, or a cause. `isRootCause` marks the bottom of the cause chain. Reached from (:LoggedFailure)-[:THREW]->."
+  description: "One throwable in the Java stack trace of a failure counted in the log store: the one thrown, or a cause. `isRootCause` marks the bottom of the cause chain. Reached from (:LoggedFailure)-[:NEWEST_TRACE]->(:LoggedTrace)-[:THREW]->."
   properties:
     id: { identity: true, description: "`<trace id>#<index>`. Identity." }
     index: { type: int, description: "Which throwable in the trace: 0 is the one thrown." }
@@ -16,13 +16,13 @@
     message: "Its message."
     isRootCause: { type: boolean, description: "True at the bottom of the cause chain." }
   virtualJoins:
-    - { anchorLabel: LoggedFailure, relationship: THREW, keyField: content, recordKeyField: anchorKey, producer: traceExceptions,
+    - { anchorLabel: LoggedTrace, relationship: THREW, keyField: content, recordKeyField: anchorKey, producer: traceExceptions,
         description: "The throwables in a logged failure's newest occurrence." }
 
 - name: LoggedJavaStackFrame
   visibility: internal
   userAnchor: false
-  description: "One frame of the Java stack trace of a failure counted in the log store: the class, method, file and line. `sourcePath` is the class's package path and file (`com/acme/Cart.java`), which is how a frame is matched to a file in a repository. Reached from (:LoggedFailure)-[:AT_FRAME]->."
+  description: "One frame of the Java stack trace of a failure counted in the log store: the class, method, file and line. `sourcePath` is the class's package path and file (`com/acme/Cart.java`), which is how a frame is matched to a file in a repository. Reached from (:LoggedFailure)-[:NEWEST_TRACE]->(:LoggedTrace)-[:AT_FRAME]->."
   properties:
     id: { identity: true, description: "`<trace id>#<throwable>.<frame>`. Identity." }
     exceptionIndex: { type: int, description: "Which throwable the frame belongs to." }
@@ -33,5 +33,5 @@
     line: { type: int, description: "The line." }
     sourcePath: "Package path and file, e.g. `com/acme/Cart.java`."
   virtualJoins:
-    - { anchorLabel: LoggedFailure, relationship: AT_FRAME, keyField: content, recordKeyField: anchorKey, producer: traceFrames,
+    - { anchorLabel: LoggedTrace, relationship: AT_FRAME, keyField: content, recordKeyField: anchorKey, producer: traceFrames,
         description: "The frames of a logged failure's newest occurrence." }

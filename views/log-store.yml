@@ -20,15 +20,15 @@
   cypher: |
     MATCH (s:LoggedService {key: $service})
     CALL {
-      WITH s WHERE $window = 'hour'
+      WITH s WITH s WHERE $window = 'hour'
       MATCH (s)-[h:FAILED_LAST_HOUR]->(fh:LoggedFailure)
       RETURN fh AS f, h.occurrences AS occurrences, h.pods AS pods, h.versions AS versions, h.lastSeenAt AS lastSeen
       UNION
-      WITH s WHERE $window = 'day'
+      WITH s WITH s WHERE $window = 'day'
       MATCH (s)-[d:FAILED_LAST_DAY]->(fd:LoggedFailure)
       RETURN fd AS f, d.occurrences AS occurrences, d.pods AS pods, d.versions AS versions, d.lastSeenAt AS lastSeen
       UNION
-      WITH s WHERE $window = 'week'
+      WITH s WITH s WHERE $window = 'week'
       MATCH (s)-[w:FAILED_LAST_WEEK]->(fw:LoggedFailure)
       RETURN fw AS f, w.occurrences AS occurrences, w.pods AS pods, w.versions AS versions, w.lastSeenAt AS lastSeen
     }
@@ -37,8 +37,9 @@
     MATCH (g:GitProject {key: 'https://github.com/' + $repo})-[:HAS_COMMIT]->(rc:GitCommit)
     WHERE rc.sha STARTS WITH version
     WITH f, occurrences, pods, versions, lastSeen, rc.sha AS running
-    MATCH (f:LoggedFailure)-[:THREW]->(x:LoggedJavaThrowable {isRootCause: true})
-    MATCH (f:LoggedFailure)-[:AT_FRAME]->(fr:LoggedJavaStackFrame)
+    MATCH (f:LoggedFailure)-[:NEWEST_TRACE]->(t:LoggedTrace)
+    MATCH (t:LoggedTrace)-[:THREW]->(x:LoggedJavaThrowable {isRootCause: true})
+    MATCH (t:LoggedTrace)-[:AT_FRAME]->(fr:LoggedJavaStackFrame)
     WHERE fr.exceptionIndex = x.index AND fr.sourcePath IS NOT NULL
     WITH running, f.failure AS failure, x.exception AS exception, x.message AS message, occurrences, pods, versions, lastSeen,
          fr.sourcePath AS sourcePath, fr.line AS line, fr.frame AS depth, fr.className + '.' + fr.method AS frame,
