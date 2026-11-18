@@ -1,0 +1,74 @@
+[
+ {
+  "name": "elastic-logs:log-store",
+  "displayName": "Log store (Elasticsearch)",
+  "description": "The Elasticsearch cluster the service logs are shipped to, and a read-only credential.",
+  "getKeyUrl": null,
+  "fields": [
+   {
+    "variable": "LOGS_ES_URL",
+    "displayName": "Cluster URL (e.g. https://logs.example.com:9200)",
+    "secret": false,
+    "set": true
+   },
+   {
+    "variable": "LOGS_ES_API_KEY",
+    "displayName": "API key (read access to the log indices)",
+    "secret": true,
+    "set": false
+   },
+   {
+    "variable": "LOGS_ES_USERNAME",
+    "displayName": "Username",
+    "secret": false,
+    "set": true
+   },
+   {
+    "variable": "LOGS_ES_PASSWORD",
+    "displayName": "Password",
+    "secret": true,
+    "set": true
+   }
+  ],
+  "apis": [],
+  "realms": [
+   "elastic-logs"
+  ],
+  "checkable": false,
+  "health": null
+ },
+ {
+  "name": "kubernetes:kubernetes",
+  "displayName": "Kubernetes cluster",
+  "description": "The cluster this world reads, and a read-only service account's token.",
+  "getKeyUrl": "https://kubernetes.io/docs/reference/access-authn-authz/service-accounts-admin/",
+  "fields": [
+   {
+    "variable": "KUBERNETES_API_SERVER",
+    "displayName": "API server URL (e.g. https://10.0.0.1:6443)",
+    "secret": false,
+    "set": true
+   },
+   {
+    "variable": "KUBERNETES_TOKEN",
+    "displayName": "A service account token bound to the built-in `view` role",
+    "secret": true,
+    "set": true
+   },
+   {
+    "variable": "KUBERNETES_CA_CERT",
+    "displayName": "The cluster's certificate authority (certificate-authority-data from a kubeconfig, or PEM); leave empty for a publicly signed API",
+    "secret": false,
+    "set": true
+   }
+  ],
+  "apis": [
+   "kubernetes"
+  ],
+  "realms": [
+   "kubernetes"
+  ],
+  "checkable": true,
+  "health": null
+ }
+]
