@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Which change broke production: setup</title>
+<script src="/api/v1/apps-runtime/v1/embabel.js"></script>
+<script src="/api/v1/apps-runtime/gateway.js"></script>
+<script type="application/embabel-app+json">
+{"version":1,"name":"which-change-setup","requires":{"lenses":[],"views":["RunningVersions","LogStoreCoverage","KubeLogFailures","WatchedServices","WhatBrokeInProduction"],"realms":["realm-which-change","realm-kubernetes","realm-elastic-logs","realm-git"],"namespaces":["repository"]}}
+</script>
+<style>
+  :root{--bg:#0b0d10;--surface:#12161b;--surface2:#171c22;--border:#232a33;--text:#e6e9ee;--dim:#8b95a3;
+        --green:#6db33f;--green2:#8fd15a;--red:#ef5b5b;--orange:#f0883e;--amber:#e3b341;--blue:#58a6ff;--violet:#a78bfa;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding-bottom:48px}
+  a{color:var(--blue);text-decoration:none} a:hover{text-decoration:underline}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 20px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .logo{width:38px;height:38px;display:grid;place-items:center}
+  h1{font-size:20px;margin:0;font-weight:700} .sub{color:var(--dim);font-size:13px}
+  
+  .search{display:flex;gap:8px;margin:18px 0 8px;flex-wrap:wrap}
+  .search input,.filter{flex:1;min-width:280px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px 14px;font-size:14px}
+  .search input:focus,.filter:focus{outline:none;border-color:var(--green)}
+  button{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 13px;cursor:pointer;font-size:13px}
+  button:hover{border-color:var(--dim)} button.primary{background:var(--green);color:#0b0d10;border-color:var(--green);font-weight:700}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px} .chips button{font-size:12px;padding:5px 10px;border-radius:999px;color:var(--dim)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin:12px 0}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;cursor:pointer;text-align:left}
+  .stat.on{border-color:var(--green)} .stat .v{font-size:26px;font-weight:700} .stat .k{font-weight:700;margin-top:2px} .stat .n{color:var(--dim);font-size:12px;margin-top:4px}
+  table{width:100%;border-collapse:collapse;table-layout:fixed} th{color:var(--dim);font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)}
+  td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top;overflow-wrap:anywhere} tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
+  .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;white-space:nowrap}
+  .p-red{background:rgba(239,91,91,.15);color:var(--red)} .p-amber{background:rgba(227,179,65,.15);color:var(--amber)} .p-dim{background:var(--surface2);color:var(--dim)} .p-green{background:rgba(109,179,63,.15);color:var(--green2)}
+  .dim{color:var(--dim)} .val{color:var(--green2)} .was{color:var(--dim)} .desc{color:var(--dim);font-size:12.5px;margin-top:2px}
+  .notable{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}
+  .ncard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 15px} .ncard .d{font-size:18px;font-weight:700;color:var(--amber);margin:3px 0}
+  .area{margin-top:6px} .area summary{cursor:pointer;padding:8px 10px;border-bottom:1px solid var(--border)} .area summary b{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+  .state{padding:26px;text-align:center;color:var(--dim)} .err{color:var(--red)}
+  .who{background:var(--surface2);border-radius:8px;padding:10px 12px;margin-top:8px;font-size:13px}
+  h2{font-size:16px;margin:22px 0 6px} h3{font-size:14px;margin:16px 0 4px} pre{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;overflow:auto;font-size:12px}
+  footer{color:var(--dim);font-size:12.5px;margin-top:28px} #how-it-works{display:none;margin-top:18px} #how-it-works:target{display:block}
+
+  .step{display:flex;gap:14px;align-items:flex-start;margin:18px 0 6px} .num{flex:none;width:28px;height:28px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);display:grid;place-items:center;font-weight:700}
+  .num.ok{background:var(--green);color:#0b0d10;border-color:var(--green)}
+  .keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px}
+  label{display:block;color:var(--dim);font-size:12px;margin:10px 0 3px} input.f{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 11px;font-size:13.5px}
+  input.f:focus{outline:none;border-color:var(--green)} .row3{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:10px}
+  .check{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)} .check:last-child{border-bottom:0}
+  .dot{flex:none;width:10px;height:10px;border-radius:50%;margin-top:6px;background:var(--border)} .dot.ok{background:var(--green)} .dot.bad{background:var(--red)} .dot.run{background:var(--amber)}
+  .msg{margin-top:8px;font-size:13px} .msg.bad{color:var(--red)} .msg.ok{color:var(--green2)}
+  @media (max-width:760px){.row3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><div><h1>Which change broke production: setup</h1>
+  <div class="sub">Connect the cluster and the logs, name a service, and check that a failure can be traced to the change behind it. Everything here is read-only on your systems; what you enter is stored in this appliance.</div></div></header>
+
+  <div class="step"><div class="num" id="n1">1</div><div><h2 style="margin:2px 0">Connect</h2><div class="sub">Read-only credentials. A secret is stored in the appliance and never shown back.</div></div></div>
+  <div class="keys" id="keys"><div class="state">Reading what is connected.</div></div>
+
+  <div class="step"><div class="num" id="n2">2</div><div><h2 style="margin:2px 0">Name a service</h2><div class="sub">The namespace and app label its pods carry, and the repository it is built from.</div></div></div>
+  <div class="card">
+    <form id="svc"><div class="row3">
+      <div><label for="namespace">Namespace</label><input class="f" id="namespace" placeholder="shop" autocomplete="off"></div>
+      <div><label for="app">App label</label><input class="f" id="app" placeholder="cart" autocomplete="off"></div>
+      <div><label for="repo">GitHub repository</label><input class="f" id="repo" placeholder="acme/cart" autocomplete="off"></div>
+    </div><div style="margin-top:12px"><button class="primary" type="submit">Check</button></div></form>
+    <div id="checks" style="margin-top:10px"></div>
+    <div id="save"></div>
+  </div>
+
+  <div class="step"><div class="num" id="n3">3</div><div><h2 style="margin:2px 0">Watched services</h2><div class="sub">Saved in this world. Ask your coding agent "what broke in production", or open one here.</div></div></div>
+  <div class="card" id="watched"><div class="state">Reading the watched services.</div></div>
+  <div id="broke"></div>
+
+  <section id="how-it-works">
+    <h2>How it works</h2>
+    <h3>What this page writes</h3>
+    <p>Two things, both into this appliance and nowhere else. A credential you enter is sent to the appliance's own keys store, which checks it where it can and refuses a value the source rejects; it is stored encrypted and no response carries it back. A service you save becomes a <span class="mono">WatchedService</span> entry in this world: a namespace, an app label and a repository name.</p>
+    <h3>What the checks read</h3>
+    <p><b>Pods and the commit they run</b>: the cluster's API lists the pods with that app label, and each pod's version label is looked up as the start of a commit id in the repository's history (<span class="mono">RunningVersions</span>). <b>Logs</b>: the log store is asked how many events it holds for the service in the last 7 days and how many carry a stack trace (<span class="mono">LogStoreCoverage</span>); with no log store, the pods' own logs are read (<span class="mono">KubeLogFailures</span>), which reach back only a few thousand lines per pod. <b>The trace</b>: <span class="mono">WhatBrokeInProduction</span> goes from each failure to the line that threw it, the commit that last changed the line, and its pull request.</p>
+    <h3>What a failed check means</h3>
+    <p>"No pods" means no pod in that namespace carries that app label: check the label with <span class="mono">kubectl get pods --show-labels</span>. "The version is not a commit" means the pods' <span class="mono">app.kubernetes.io/version</span> label is not the start of a commit id in the repository: build images so the label carries the commit. "No log events" means nothing is shipped under that service name. An error from a source is shown as that source's error, never as an empty result.</p>
+    <h3>What the appliance did here</h3>
+    <p>Each check is one query that joins sources read live with your credentials: the cluster's API, the log store, a clone of the repository and GitHub. Nothing is copied out of them, and nothing is installed in the application or the cluster.</p>
+  </section>
+  <footer>Reads only. Nothing is installed in your application. · <a href="#how-it-works">How it works</a></footer>
+</div>
+
+<div id="embabel-badge" style="position:fixed;bottom:0;left:0;right:0;text-align:center;padding:6px 0;background:rgba(11,13,16,.92);border-top:1px solid #232a33;font-size:.75rem;color:#8b95a3;z-index:9999;pointer-events:none;">
+  Created with <a href="https://embabel.com" target="_blank" rel="noopener noreferrer" style="color:#6db33f;pointer-events:auto;">Embabel</a>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  /* The key entries this page connects, by the realm that declares them. */
+  var REALMS = { 'kubernetes': 'The cluster', 'elastic-logs': 'The log store (optional: without it, the pods\' own logs are read)' };
+  var state = { keys: null, keysError: null, checks: null, checked: null, watched: null, watchedError: null, saving: {}, note: {}, broke: null, run: 0 };
+  function $(id) { return document.getElementById(id); }
+  function esc(v) { return v == null ? '' : String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function rowsOf(r) {
+    if (!r) return [];
+    if (Array.isArray(r)) return r;
+    if (Array.isArray(r.rows)) return r.rows;
+    if (Array.isArray(r.data)) return r.data;
+    if (r.data && Array.isArray(r.data.rows)) return r.data.rows;
+    return [];
+  }
+  function view(name, params) {
+    return embabel.views.invoke(name, params || {}).then(rowsOf).catch(function (e) {
+      if (e && e.reason === 'FETCHED_NOT_MATCHED') return [];
+      throw e;
+    });
+  }
+  function words(e) { return esc((e && (e.message || e.reason)) || 'The appliance did not answer.'); }
+  /* The appliance's own keys routes: the gateway does not cover them, so they are fetched with the session. */
+  function api(method, path, body) {
+    return fetch('/api/v1' + path, { method: method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (res) { return res.json().catch(function () { return null; }).then(function (json) { return { ok: res.ok, status: res.status, json: json }; }); });
+  }
+
+  /* ── 1. keys ── */
+  function loadKeys() {
+    return api('GET', '/keys').then(function (r) {
+      if (!r.ok) throw new Error('The appliance refused to list its keys (' + r.status + ').');
+      state.keys = (r.json || []).filter(function (k) { return (k.realms || []).some(function (x) { return REALMS[x]; }); });
+      state.keysError = null; drawKeys();
+    }).catch(function (e) { state.keysError = e; state.keys = []; drawKeys(); });
+  }
+  function connected(k) {
+    /* An entry is usable when its address is set and, where it asks for secrets, at least one is. */
+    var secrets = k.fields.filter(function (f) { return f.secret; });
+    return k.fields.some(function (f) { return !f.secret && f.set; }) && (!secrets.length || secrets.some(function (f) { return f.set; }));
+  }
+  function drawKeys() {
+    if (state.keysError) { $('keys').innerHTML = '<div class="state err">' + words(state.keysError) + '</div>'; return; }
+    if (!state.keys.length) { $('keys').innerHTML = '<div class="state">This world asks for no cluster or log-store key: install realm-kubernetes (and realm-elastic-logs for a log store) first.</div>'; return; }
+    $('keys').innerHTML = state.keys.map(function (k, i) {
+      var realm = (k.realms || []).filter(function (x) { return REALMS[x]; })[0];
+      var ok = connected(k), note = state.note[k.name];
+      return '<form class="card" data-key="' + i + '" style="margin:0"><div><b>' + esc(k.displayName) + '</b> ' +
+        (ok ? '<span class="pill p-green">connected</span>' : '<span class="pill p-dim">not connected</span>') + '</div><div class="sub">' + esc(REALMS[realm]) + '. ' + esc(k.description || '') + '</div>' +
+        k.fields.map(function (f) {
+          return '<label>' + esc(f.displayName) + (f.set ? ' <span class="pill p-green">set</span>' : '') + '</label><input class="f" name="' + esc(f.variable) + '" type="' + (f.secret ? 'password' : 'text') +
+            '" placeholder="' + (f.set ? (f.secret ? 'stored; type to replace' : 'set; type to replace') : '') + '" autocomplete="off">';
+        }).join('') +
+        '<div style="margin-top:12px"><button type="submit"' + (state.saving[k.name] ? ' disabled' : '') + '>' + (state.saving[k.name] ? 'Checking and storing' : 'Store in the appliance') + '</button>' +
+        (k.getKeyUrl ? ' <a class="sub" href="' + esc(k.getKeyUrl) + '" target="_blank" rel="noopener">How to get one</a>' : '') + '</div>' +
+        (note ? '<div class="msg ' + (note.ok ? 'ok' : 'bad') + '">' + note.text + '</div>' : '') + '</form>';
+    }).join('');
+    $('n1').className = 'num' + (state.keys.some(connected) ? ' ok' : '');
+  }
+  function storeKey(i, form) {
+    var k = state.keys[i], values = {};
+    k.fields.forEach(function (f) { var v = form.elements[f.variable].value; if (v) values[f.variable] = v.trim(); });
+    if (!Object.keys(values).length) { state.note[k.name] = { ok: false, text: 'Enter a value to store.' }; drawKeys(); return; }
+    state.saving[k.name] = true; state.note[k.name] = null; drawKeys();
+    api('PUT', '/keys/' + encodeURIComponent(k.name), { values: values }).then(function (r) {
+      state.saving[k.name] = false;
+      var health = r.json && r.json.health, said = health && (health.message || health.detail || health.status);
+      if (r.ok) state.note[k.name] = { ok: true, text: 'Stored.' + (said ? ' The source says: ' + esc(said) + '.' : (r.json && r.json.checkable === false ? ' This key cannot be checked by itself: run the checks below.' : '')) };
+      else if (r.status === 422) state.note[k.name] = { ok: false, text: 'Not stored: the source refused it' + (said ? ' (' + esc(said) + ')' : '') + '.' };
+      else state.note[k.name] = { ok: false, text: 'Not stored (' + r.status + ')' + (r.json && (r.json.detail || r.json.message) ? ': ' + esc(r.json.detail || r.json.message) : '') + '.' };
+      return loadKeys();
+    }).catch(function (e) { state.saving[k.name] = false; state.note[k.name] = { ok: false, text: 'Not stored: ' + words(e) }; drawKeys(); });
+  }
+
+  /* ── 2. checks ── */
+  var CHECKS = [['pods', 'Pods in the cluster'], ['commit', 'The commit they run'], ['logs', 'Logs']];
+  function check(ns, app, repo) {
+    var run = ++state.run;
+    state.checked = { namespace: ns, app: app, repo: repo }; state.checks = { pods: { s: 'run' }, commit: { s: 'run' }, logs: { s: 'run' } }; state.logs = null; drawChecks();
+    function set(id, s, text) { if (run === state.run) { state.checks[id] = { s: s, text: text }; drawChecks(); } }
+    view('RunningVersions', { namespace: ns, app: app, repo: repo }).then(function (rows) {
+      var pods = rows.reduce(function (n, r) { return n + (r.pods || 0); }, 0);
+      if (!pods) { set('pods', 'bad', 'No pod in namespace <span class="mono">' + esc(ns) + '</span> carries the app label <span class="mono">' + esc(app) + '</span>.'); set('commit', 'bad', 'Not checked: there are no pods.'); return; }
+      var looping = rows.reduce(function (n, r) { return n + (r.crashLooping || 0); }, 0);
+      set('pods', 'ok', pods + ' pod' + (pods === 1 ? '' : 's') + ' on ' + rows.length + ' version' + (rows.length === 1 ? '' : 's') + (looping ? ', ' + looping + ' crash-looping' : '') + '.');
+      var found = rows.filter(function (r) { return r.commit; }), lost = rows.filter(function (r) { return !r.commit; });
+      if (!found.length) set('commit', 'bad', 'The pods\' version label (<span class="mono">' + esc(rows[0].version || 'none') + '</span>) is not the start of a commit in <span class="mono">' + esc(repo) + '</span>, so the code that is running cannot be named.');
+      else set('commit', lost.length ? 'bad' : 'ok', found.map(function (r) { return '<span class="mono">' + esc(String(r.commit).slice(0, 7)) + '</span> ' + esc(r.change || '') + ' (' + r.pods + ' pod' + (r.pods === 1 ? '' : 's') + ')'; }).join('; ') +
+        (lost.length ? '. ' + lost.length + ' version label' + (lost.length === 1 ? ' is' : 's are') + ' not a commit there.' : '.'));
+    }).catch(function (e) { set('pods', 'bad', 'The cluster could not be read: ' + words(e)); set('commit', 'bad', 'Not checked.'); });
+    view('LogStoreCoverage', { service: app }).then(function (rows) {
+      var t = rows[0];
+      if (t && t.events) { state.logs = 'log store'; set('logs', 'ok', 'The log store holds ' + Number(t.events).toLocaleString() + ' events for this service in the last 7 days, ' + Number(t.withTrace || 0).toLocaleString() + ' with a stack trace; the newest is from ' + esc(String(t.newest || '').slice(0, 16).replace('T', ' ')) + '.'); return; }
+      return podLogs('The log store holds no event for a service named <span class="mono">' + esc(app) + '</span>. ');
+    }).catch(function (e) { return podLogs('The log store could not be read (' + words(e) + '). '); });
+    function podLogs(why) {
+      return view('KubeLogFailures', { namespace: ns, app: app }).then(function (rows) {
+        state.logs = 'cluster';
+        set('logs', 'ok', why + 'Reading the pods\' own logs instead: ' + rows.length + ' failure' + (rows.length === 1 ? '' : 's') + ' in what the cluster still holds, a few thousand lines per pod.');
+      }).catch(function (e) { set('logs', 'bad', why + 'The pods\' own logs could not be read either: ' + words(e)); });
+    }
+  }
+  function drawChecks() {
+    if (!state.checks) { $('checks').innerHTML = ''; $('save').innerHTML = ''; return; }
+    $('checks').innerHTML = CHECKS.map(function (c) {
+      var k = state.checks[c[0]];
+      return '<div class="check"><div class="dot ' + k.s + '"></div><div><b>' + c[1] + '</b><div class="sub">' + (k.s === 'run' ? 'Checking.' : k.text) + '</div></div></div>';
+    }).join('');
+    var all = CHECKS.every(function (c) { return state.checks[c[0]].s === 'ok'; }), done = CHECKS.every(function (c) { return state.checks[c[0]].s !== 'run'; });
+    $('n2').className = 'num' + (all ? ' ok' : '');
+    $('save').innerHTML = !done ? '' : all
+      ? '<div style="margin-top:12px"><button class="primary" id="saveBtn">Watch this service</button> <span class="sub">Saves the three names in this world.</span></div>' + (state.saveNote ? '<div class="msg ' + (state.saveNote.ok ? 'ok' : 'bad') + '">' + state.saveNote.text + '</div>' : '')
+      : '<div class="msg bad">Fix what is marked above, then check again. A service can be saved once all three pass.</div>';
+  }
+  function save() {
+    var c = state.checked;
+    if (!window.gateway || !gateway.repository) { state.saveNote = { ok: false, text: 'Saving needs the world gateway: open this page inside the appliance.' }; drawChecks(); return; }
+    gateway.repository.createEntry({ type: 'WatchedService', data: { key: c.namespace + '/' + c.app, namespace: c.namespace, app: c.app, repo: c.repo, logs: state.logs || 'cluster' } })
+      .then(function () { state.saveNote = { ok: true, text: 'Saved.' }; drawChecks(); return loadWatched(); })
+      .catch(function (e) { state.saveNote = { ok: false, text: 'Not saved: ' + words(e) }; drawChecks(); });
+  }
+
+  /* ── 3. watched ── */
+  function loadWatched() {
+    return view('WatchedServices', {}).then(function (rows) { state.watched = rows; state.watchedError = null; drawWatched(); })
+      .catch(function (e) { state.watchedError = e; state.watched = []; drawWatched(); });
+  }
+  function drawWatched() {
+    if (state.watchedError) { $('watched').innerHTML = '<div class="state err">The watched services could not be read: ' + words(state.watchedError) + '</div>'; return; }
+    $('n3').className = 'num' + (state.watched.length ? ' ok' : '');
+    if (!state.watched.length) { $('watched').innerHTML = '<div class="state">No service is watched yet. Check one above and save it.</div>'; return; }
+    $('watched').innerHTML = '<table><thead><tr><th>Service</th><th>Repository</th><th>Logs from</th><th></th></tr></thead><tbody>' + state.watched.map(function (w, i) {
+      return '<tr><td class="mono">' + esc(w.key) + '</td><td class="mono">' + esc(w.repo) + '</td><td>' + esc(w.logs === 'log store' ? 'the log store' : 'the cluster') + '</td><td><button data-broke="' + i + '">What broke?</button></td></tr>';
+    }).join('') + '</tbody></table>';
+  }
+  function broke(i) {
+    var w = state.watched[i];
+    $('broke').innerHTML = '<div class="card"><div class="state">Tracing ' + esc(w.key) + '\'s failures to the changes behind them. The first read of a repository takes up to a minute.</div></div>';
+    view('WhatBrokeInProduction', { namespace: w.namespace, app: w.app, repo: w.repo }).then(function (rows) {
+      if (!rows.length) { $('broke').innerHTML = '<div class="card"><div class="state">No failure in ' + esc(w.key) + '\'s pod logs has a line in ' + esc(w.repo) + ' at the commit that is running.</div></div>'; return; }
+      $('broke').innerHTML = '<div class="card"><div class="sub">' + rows.length + ' failure' + (rows.length === 1 ? '' : 's') + ' in ' + esc(w.key) + '\'s pod logs with a line in the repository, most frequent first. The change is the one that last touched the line: the place to look first, not proof of cause.</div>' +
+        '<table><thead><tr><th>Failure</th><th>Where</th><th>Change</th></tr></thead><tbody>' + rows.map(function (r) {
+          return '<tr><td><b>' + esc(String(r.exception).split('.').pop()) + '</b> <span class="dim">' + r.occurrences + ' time' + (r.occurrences === 1 ? '' : 's') + ' on ' + r.pods + ' pod' + (r.pods === 1 ? '' : 's') + '</span><div class="desc">' + esc(r.message) + '</div></td>' +
+            '<td class="mono">' + esc(String(r.path).split('/').pop()) + ':' + esc(r.line) + '<div class="desc">running ' + esc(r.runningCommit) + '</div></td>' +
+            '<td><span class="mono">' + esc(r.commit) + '</span> ' + esc(r.change) + '<div class="desc">' + esc(r.author) + (r.authorKind && r.authorKind !== 'human' ? ' <span class="pill p-amber">with a coding agent</span>' : '') +
+            (r.pullRequest ? ' · <a href="' + esc(r.pullRequestUrl || '#') + '" target="_blank" rel="noopener">pull request #' + esc(r.pullRequest) + '</a>' : '') + '</div></td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }).catch(function (e) { $('broke').innerHTML = '<div class="card"><div class="state err">The trace could not be run: ' + words(e) + '</div></div>'; });
+  }
+
+  document.addEventListener('submit', function (e) {
+    var k = e.target.closest('[data-key]');
+    if (k) { e.preventDefault(); storeKey(+k.getAttribute('data-key'), k); return; }
+    if (e.target.id === 'svc') {
+      e.preventDefault(); state.saveNote = null;
+      var ns = $('namespace').value.trim(), app = $('app').value.trim(), repo = $('repo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
+      if (ns && app && /^[^\/\s]+\/[^\/\s]+$/.test(repo)) check(ns, app, repo);
+      else { state.checks = null; $('checks').innerHTML = '<div class="msg bad">Enter a namespace, an app label and a repository as owner/repo.</div>'; $('save').innerHTML = ''; }
+    }
+  });
+  document.addEventListener('click', function (e) {
+    if (e.target.id === 'saveBtn') { save(); return; }
+    var b = e.target.closest('[data-broke]'); if (b) broke(+b.getAttribute('data-broke'));
+  });
+  loadKeys(); loadWatched();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# The services this world watches: which pods, which logs and which repository belong together.
+# The setup page writes one when its checks pass; the views take the same three values as
+# parameters, so nothing depends on an entry existing.
+
+- name: WatchedService
+  description: "A running service this world watches: the namespace and app label its pods carry, and the GitHub repository it is built from. Add one from the setup page, or with gateway.repository.createEntry({ type: 'WatchedService', data: { key: 'shop/cart', namespace: 'shop', app: 'cart', repo: 'acme/cart' } })."
+  properties:
+    key:
+      description: "'<namespace>/<app>'. Identity."
+      metadata:
+        identity: "true"
+    namespace: "The Kubernetes namespace."
+    app: "The pods' app label, which is also the service name its log events carry."
+    repo: "The GitHub repository as owner/repo."
+    logs: "Where its logs are read: 'log store' (Elasticsearch) or 'cluster' (the pods' own logs)."
