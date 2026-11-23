@@ -14,19 +14,30 @@ that shipped, the history from a clone of the repository.
 
 | view | question |
 |---|---|
-| `WhichChange(fingerprint, project, sourceRoot?)` | one failure, traced to the change and its pull request |
-| `FailuresAndTheirChanges(project, sourceRoot?, logs?, limit?)` | every failure with a line in the application's code, and the change behind each |
+| `WhatBrokeInProduction(namespace, app, repo)` | what the pods of one application are failing with now, each failure traced to the line, the commit, its author and the pull request |
+| `WhatBrokeFromLogs(service, repo, window?)` | the same chain from the log store: counted over every event in the hour, day or week, and still there after the pod is gone |
+| `StartupFailureFromLogs(service, repo, window?)` | a service that never started: the setting it could not resolve, the bean that needed it, and the change that added it |
+| `PoolExhaustionCause(service, repo, window?)` | database pool timeouts, traced past the requests that timed out to the transaction that holds a connection across a remote call |
+| `WhichChange(fingerprint, project)` / `FailuresAndTheirChanges(project, logs?, limit?)` | one failure, or every failure, from log files the world holds |
+| `StartupFailureCause(project, fingerprint?)`, `ConnectionHeldAcrossRemoteCall(project)` | the startup and pool chains over log files, by project |
+| `RunningVersions(namespace, app, repo)` | which commit each version of the pods is: how many pods, ready, crash-looping, and who wrote it |
+| `WatchedServices` | the services this world watches |
 
-`project` is the repository at the commit that was running:
-`https://github.com/owner/repo@<full sha>`. `fingerprint` comes from realm-jvm-logs' `JvmLogFailures`.
+`repo` is `owner/repo` on GitHub. `project` is the repository at the commit that was running:
+`https://github.com/owner/repo@<full sha>`. The views that start from the cluster or the log store
+find that commit themselves, from the pods' `app.kubernetes.io/version` label.
 
 ## It adds no data
 
-Its views join three realms, all of which must be installed, with realm-dev-vocabulary:
+Its views join realms that each know one thing, all of which must be installed, with
+realm-dev-vocabulary:
 
 | realm | gives |
 |---|---|
-| realm-jvm-logs (with realm-java-code and realm-java-source-code) | the failure, the frame in the application, its line |
+| realm-kubernetes | the pods, the commit each runs, and their logs |
+| realm-elastic-logs | the same logs from the log store, after the pods are gone (optional) |
+| realm-jvm-logs | the failure, its stack trace, the frame in the application |
+| realm-polyglot-code | the repository's files at that commit, and the declarations in them |
 | realm-git | the commit that last changed that line, its author and co-authors |
 | realm-github | the pull request that commit came in through |
 
