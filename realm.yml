@@ -15,7 +15,7 @@ description: |
   Requires realm-jvm-logs, realm-polyglot-code, realm-git, realm-github, realm-kubernetes and
   realm-dev-vocabulary. With realm-elastic-logs installed, WhatBrokeFromLogs runs the same chain
   from the log store: counted over every event, and still there after the pod is gone.
-version: 0.1.0
+version: 0.1.1
 maturity: experimental
 url: https://github.com/embabel-worlds/realm-which-change
 author: Rod Johnson

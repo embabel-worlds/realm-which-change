@@ -1,7 +1,9 @@
 - name: WatchedServices
   description: >-
-    SELECT THIS for "which services are we watching", "what is set up". The services this world
-    watches, each with its namespace, app label, repository and where its logs are read.
+    The services this world watches: namespace, app, repository and log source. SELECT THIS for "which services are we watching", "what is set up". The services this world
+    watches, each with its namespace, app label, repository and where its logs are read. Only
+    services entered as WatchedService records; a service nobody added is not listed, and every
+    other view takes the same values as params without needing one.
   cypher: |
     MATCH (w:WatchedService)
     RETURN w.key AS key, w.namespace AS namespace, w.app AS app, w.repo AS repo, w.logs AS logs

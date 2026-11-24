@@ -5,11 +5,17 @@
   visibility: internal
   userAnchor: false
   description: "A call in a Java file: the called name (`method`), what it is called on (`receiver`), and the method it is in (`enclosing`), with its file and line. Matched by NAME only: say 'calls something named X', never that it calls a particular X. Reach it from (:CodeProject {key})-[:CALLS_IN_JAVA]->."
+  examples:
+    - q: "where does acme/shop call something named send"
+      cypher: |
+        MATCH (:CodeProject {key: 'https://github.com/acme/shop'})-[:CALLS_IN_JAVA]->(x:JavaSourceCall {method: 'send'})
+        RETURN x.path AS path, x.line AS line, x.receiver AS receiver, x.enclosing AS inMethod
+        ORDER BY path, line
   virtualJoins:
     - { anchorLabel: CodeProject, relationship: CALLS_IN_JAVA, keyField: key, recordKeyField: anchorKey, producer: javaSourceCalls, maxFanoutTotal: 200000,
         description: "(:CodeProject {key:$project})-[:CALLS_IN_JAVA]->(x:JavaSourceCall)" }
   properties:
-    id: { identity: true, description: "Identity." }
+    id: { identity: true, description: "The call's own key, unique within the project read: its file, line and position. Identity; not meaningful outside this realm." }
     path: "File path, relative to the project."
     line: { type: int, description: "Line it is on." }
     method: "The called name."

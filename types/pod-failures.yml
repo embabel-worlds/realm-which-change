@@ -8,12 +8,12 @@
 - name: PodJavaThrowable
   visibility: internal
   userAnchor: false
-  description: "One throwable in the Java stack trace a pod's log event logged: the one thrown, or a cause. `isRootCause` marks the bottom of the cause chain. Reached from (:KubeLogEvent)-[:THREW]->."
+  description: "One throwable, identified by id `<trace id>#<index>`, in the Java stack trace a pod's log event logged: the one thrown, or a cause. `isRootCause` marks the bottom of the cause chain. Reached from (:KubeLogEvent)-[:THREW]->."
   properties:
     id: { identity: true, description: "`<trace id>#<index>`. Identity." }
     index: { type: int, description: "Which throwable in the trace: 0 is the one thrown." }
     exception: "The exception's class."
-    message: "Its message."
+    message: "The exception's message as logged, the text after the class name; empty when it was thrown with none."
     isRootCause: { type: boolean, description: "True at the bottom of the cause chain." }
   virtualJoins:
     - { anchorLabel: KubeLogEvent, relationship: THREW, keyField: content, recordKeyField: anchorKey, producer: traceExceptions,
@@ -22,15 +22,26 @@
 - name: PodJavaStackFrame
   visibility: internal
   userAnchor: false
-  description: "One frame of the Java stack trace a pod's log event logged: the class, method, file and line. `sourcePath` is the class's package path and file (`com/acme/Cart.java`), which is how a frame is matched to a file in a repository. Reached from (:KubeLogEvent)-[:AT_FRAME]->."
+  description: "One frame, identified by id `<trace id>#<throwable>.<frame>`, of the Java stack trace a pod's log event logged: the class, method, file and line. `sourcePath` is the class's package path and file (`com/acme/Cart.java`), which is how a frame is matched to a file in a repository. Reached from (:KubeLogEvent)-[:AT_FRAME]->."
+  examples:
+    # A frame belongs to ONE throwable of the trace: match exceptionIndex to the root cause's index.
+    - q: "which lines are the cart pods in shop failing at"
+      cypher: |
+        MATCH (n:KubeNamespace {name: 'shop'})-[:HAS_POD]->(p:KubePod {app: 'cart'})
+        MATCH (p)-[:HAS_LOG_EVENT]->(e:KubeLogEvent {hasTrace: true})
+        MATCH (e)-[:THREW]->(x:PodJavaThrowable {isRootCause: true})
+        MATCH (e)-[:AT_FRAME]->(fr:PodJavaStackFrame)
+        WHERE fr.exceptionIndex = x.index AND fr.frame = 0
+        RETURN x.exception AS exception, fr.sourcePath AS sourcePath, fr.line AS line, count(DISTINCT e) AS occurrences
+        ORDER BY occurrences DESC
   properties:
     id: { identity: true, description: "`<trace id>#<throwable>.<frame>`. Identity." }
     exceptionIndex: { type: int, description: "Which throwable the frame belongs to." }
     frame: { type: int, description: "The frame's position in its throwable, 0 first." }
     className: "The frame's class."
-    method: "The method."
+    method: "The method the frame is in, as the trace names it (simple name, no signature): `checkout`, `<init>` for a constructor."
     file: "The file the frame names."
-    line: { type: int, description: "The line." }
+    line: { type: int, description: "The line number in `file` the frame names, from 1; empty for a native method or unknown source." }
     sourcePath: "Package path and file, e.g. `com/acme/Cart.java`."
   virtualJoins:
     - { anchorLabel: KubeLogEvent, relationship: AT_FRAME, keyField: content, recordKeyField: anchorKey, producer: traceFrames,

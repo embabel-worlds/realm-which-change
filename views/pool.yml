@@ -4,7 +4,7 @@
 
 - name: ConnectionHeldAcrossRemoteCall
   description: >-
-    SELECT THIS for "which transactions hold a database connection across a remote call", "why
+    Transactional methods that hold a DB connection across an HTTP call. SELECT THIS for "which transactions hold a database connection across a remote call", "why
     does the connection pool run out", "is there an HTTP call inside a transaction". Every
     @Transactional method in the project's main source that calls, through a field, a class of the
     project that makes an HTTP call: the method, the line of the call, the class it goes through
@@ -17,7 +17,7 @@
     HttpClient, RestClient, RestTemplate, WebClient, OkHttp and Apache HttpClient. No rows means
     none was found within those limits, not that there is none.
   params:
-    project: { type: string, description: "The repository at a commit: 'https://github.com/owner/repo@<full sha>'." }
+    project: { type: string, required: true, description: "The repository at a commit: 'https://github.com/owner/repo@<full sha>'." }
   cypher: |
     MATCH (p:JavaProject {key: $project})-[:HAS_ANNOTATION]->(a:JavaProjectAnnotation)
     WHERE a.name = 'Transactional' AND a.targetKind = 'method' AND NOT a.path CONTAINS 'src/test/'
@@ -45,7 +45,7 @@
 
 - name: PoolExhaustionCause
   description: >-
-    SELECT THIS for "why did the connection pool run out", "what caused 'Connection is not
+    Which change exhausted the database connection pool, from the log store. SELECT THIS for "why did the connection pool run out", "what caused 'Connection is not
     available, request timed out'", "which change exhausted the database pool", when the
     service's logs are shipped to Elasticsearch. When the log store holds pool-timeout failures
     (SQLTransientConnectionException) for the service in the window (hour, day or week): how many,
@@ -57,8 +57,8 @@
     time. No rows means no pool timeout was logged in the window, or no such method was found
     (see ConnectionHeldAcrossRemoteCall for what is read).
   params:
-    service: { type: string, description: "The service: the app label, deployment or service name its log events carry." }
-    repo: { type: string, description: "The GitHub repository as owner/repo." }
+    service: { type: string, required: true, description: "The service: the app label, deployment or service name its log events carry." }
+    repo: { type: string, required: true, description: "The GitHub repository as owner/repo." }
     window: { type: string, default: "day", description: "hour, day or week." }
   cypher: |
     MATCH (s:LoggedService {key: $service})

@@ -8,12 +8,12 @@
 - name: LoggedJavaThrowable
   visibility: internal
   userAnchor: false
-  description: "One throwable in the Java stack trace of a failure counted in the log store: the one thrown, or a cause. `isRootCause` marks the bottom of the cause chain. Reached from (:LoggedFailure)-[:NEWEST_TRACE]->(:LoggedTrace)-[:THREW]->."
+  description: "One throwable, identified by id `<trace id>#<index>`, in the Java stack trace of a failure counted in the log store: the one thrown, or a cause. `isRootCause` marks the bottom of the cause chain. Reached from (:LoggedFailure)-[:NEWEST_TRACE]->(:LoggedTrace)-[:THREW]->."
   properties:
     id: { identity: true, description: "`<trace id>#<index>`. Identity." }
     index: { type: int, description: "Which throwable in the trace: 0 is the one thrown." }
     exception: "The exception's class."
-    message: "Its message."
+    message: "The exception's message as logged, the text after the class name; empty when it was thrown with none."
     isRootCause: { type: boolean, description: "True at the bottom of the cause chain." }
   virtualJoins:
     - { anchorLabel: LoggedTrace, relationship: THREW, keyField: content, recordKeyField: anchorKey, producer: traceExceptions,
@@ -22,15 +22,15 @@
 - name: LoggedJavaStackFrame
   visibility: internal
   userAnchor: false
-  description: "One frame of the Java stack trace of a failure counted in the log store: the class, method, file and line. `sourcePath` is the class's package path and file (`com/acme/Cart.java`), which is how a frame is matched to a file in a repository. Reached from (:LoggedFailure)-[:NEWEST_TRACE]->(:LoggedTrace)-[:AT_FRAME]->."
+  description: "One frame, identified by id `<trace id>#<throwable>.<frame>`, of the Java stack trace of a failure counted in the log store: the class, method, file and line. `sourcePath` is the class's package path and file (`com/acme/Cart.java`), which is how a frame is matched to a file in a repository. Reached from (:LoggedFailure)-[:NEWEST_TRACE]->(:LoggedTrace)-[:AT_FRAME]->."
   properties:
     id: { identity: true, description: "`<trace id>#<throwable>.<frame>`. Identity." }
     exceptionIndex: { type: int, description: "Which throwable the frame belongs to." }
     frame: { type: int, description: "The frame's position in its throwable, 0 first." }
     className: "The frame's class."
-    method: "The method."
+    method: "The method the frame is in, as the trace names it (simple name, no signature): `checkout`, `<init>` for a constructor."
     file: "The file the frame names."
-    line: { type: int, description: "The line." }
+    line: { type: int, description: "The line number in `file` the frame names, from 1; empty for a native method or unknown source." }
     sourcePath: "Package path and file, e.g. `com/acme/Cart.java`."
   virtualJoins:
     - { anchorLabel: LoggedTrace, relationship: AT_FRAME, keyField: content, recordKeyField: anchorKey, producer: traceFrames,

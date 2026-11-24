@@ -4,7 +4,7 @@
 
 - name: WhatBrokeInProduction
   description: >-
-    SELECT THIS for "what is failing in production and which change caused it", "why are the pods
+    What the pods are failing on now, each traced to the change behind it. SELECT THIS for "what is failing in production and which change caused it", "why are the pods
     throwing errors", "which change broke the running service", "did an agent write the code that
     is failing in production". The failures the pods of one application are logging now, including
     what a crashed container wrote before it restarted, each traced to the method, file and line
@@ -15,9 +15,9 @@
     a library, such as a startup failure in the framework). A database pool timeout is left out
     too: the request that logs it is a victim, not the cause; ask PoolExhaustionCause.
   params:
-    namespace: { type: string, description: "The namespace." }
-    app: { type: string, description: "The application: the pods' app label." }
-    repo: { type: string, description: "The GitHub repository as owner/repo." }
+    namespace: { type: string, required: true, description: "The namespace." }
+    app: { type: string, required: true, description: "The application: the pods' app label." }
+    repo: { type: string, required: true, description: "The GitHub repository as owner/repo." }
   cypher: |
     MATCH (n:KubeNamespace {name: $namespace})-[:HAS_POD]->(p:KubePod)
     WHERE p.app = $app AND p.version <> ''
