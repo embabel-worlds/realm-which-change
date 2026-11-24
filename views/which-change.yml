@@ -13,7 +13,7 @@
 
 - name: WhichChange
   description: >-
-    SELECT THIS for "which change broke this", "who changed the line that is failing", "which pull
+    One logged failure traced to its line, commit, author and pull request. SELECT THIS for "which change broke this", "who changed the line that is failing", "which pull
     request caused this error", "did an agent write the code that failed". One logged failure, by
     its fingerprint (from JvmLogFailures), traced to its cause: the exception and how often it
     occurred, the method, file and line in the application that threw it, the commit that last
@@ -22,8 +22,8 @@
     line is the one the stack trace names: the change that last touched it is the place to look
     first, not a proof of cause. No rows means no frame of the failure is in this repository.
   params:
-    fingerprint: { type: string, description: "The failure's fingerprint, from JvmLogFailures." }
-    project: { type: string, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
+    fingerprint: { type: string, required: true, description: "The failure's fingerprint, from JvmLogFailures." }
+    project: { type: string, required: true, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
   cypher: |
     MATCH (me:AssistantUser)-[:HAS_LOG_EVENT]->(e:LogEvent {hasTrace: true})
     WHERE e.fingerprint = $fingerprint
@@ -49,15 +49,15 @@
 
 - name: FailuresAndTheirChanges
   description: >-
-    SELECT THIS for "what is failing and which changes are behind it", "the failures in the logs
+    Every logged failure with a line in the repository, with who last changed it. SELECT THIS for "what is failing and which changes are behind it", "the failures in the logs
     with who last changed the code". Every failure the logs recorded that has a line in this
     repository, each with the commit that last changed that line and who wrote it, newest failure
     first. A failure with no frame in the repository (another program's, or one thrown wholly
     inside a library) is left out. For the pull request behind one of them, ask WhichChange with
     its fingerprint.
   params:
-    project: { type: string, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
-    logs: { type: string, default: "", description: "Only the log files under this path, e.g. 'logs/shop'; empty for every log the world holds." }
+    project: { type: string, required: true, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
+    logs: { type: string, default: "", description: "A PREFIX match on the log file's path: 'logs/shop' keeps every log file whose path starts with it. Case-sensitive. Empty for every log the world holds." }
     limit: { type: int, default: 25, description: "How many failures to return." }
   cypher: |
     MATCH (me:AssistantUser)-[:HAS_LOG_EVENT]->(e:LogEvent {hasTrace: true})
@@ -86,7 +86,7 @@
 
 - name: RunningVersions
   description: >-
-    SELECT THIS for "which commit is running", "what version is deployed", "is my change live",
+    Which commit each pod of one application runs, with pod counts and readiness. SELECT THIS for "which commit is running", "what version is deployed", "is my change live",
     "how many pods run the new version". The pods of one application in a namespace, by the
     version each says it runs: how many pods, how many ready, how many crash-looping, and the
     COMMIT that version is, with its title, author and whether a coding agent helped. `project` is
@@ -94,9 +94,9 @@
     as the start of a commit id and found in the repository's history (the default branch, a year
     back); `commit` is empty when the label is not a commit there.
   params:
-    namespace: { type: string, description: "The namespace." }
-    app: { type: string, description: "The application: the pods' app label." }
-    repo: { type: string, description: "The GitHub repository as owner/repo." }
+    namespace: { type: string, required: true, description: "The namespace." }
+    app: { type: string, required: true, description: "The application: the pods' app label." }
+    repo: { type: string, required: true, description: "The GitHub repository as owner/repo." }
   cypher: |
     MATCH (n:KubeNamespace {name: $namespace})-[:HAS_POD]->(p:KubePod)
     WHERE p.app = $app

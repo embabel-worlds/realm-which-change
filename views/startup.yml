@@ -5,7 +5,7 @@
 
 - name: StartupFailureCause
   description: >-
-    SELECT THIS for "why won't the application start", "which change broke startup", "why is the
+    Why a Spring application failed to start, traced to the change behind it. SELECT THIS for "why won't the application start", "which change broke startup", "why is the
     pod crash-looping", "could not resolve placeholder". A Spring application that failed to start
     because a setting it needs was supplied by nothing: the setting, the bean Spring was creating,
     the declaration in the repository that asks for the setting (`${...}`) with its file and line,
@@ -16,7 +16,7 @@
     JvmLogFailures), or every such failure in the logs. No rows means no logged failure is an
     unresolved setting, or nothing in the repository at that commit asks for it.
   params:
-    project: { type: string, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
+    project: { type: string, required: true, description: "The repository at the commit that was running: 'https://github.com/owner/repo@<full sha>'." }
     fingerprint: { type: string, default: "", description: "One failure's fingerprint, from JvmLogFailures; empty for every startup failure of this kind." }
   cypher: |
     MATCH (me:AssistantUser)-[:HAS_LOG_EVENT]->(e:LogEvent {hasTrace: true})
