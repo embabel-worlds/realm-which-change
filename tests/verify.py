@@ -17,25 +17,11 @@ def view(name, args):
     except urllib.error.HTTPError as e:
         return {"error": f"HTTP {e.code}: {e.read().decode()[:300]}"}
 
-# A view's own word on whether its rows are the whole answer. A PARTIAL outcome is still SUCCEEDED,
-# so rows read on status alone (or on `data` being there) count a short answer as the realm's: a
-# source that failed under load, or a capped page, reads as drift.
-SHORT_PUBLIC = ("PARTIAL", "REDUCTION_FAILED", "COMPUTE_FAILED", "PROPERTY_NOT_STORED",
-                "AGENTIC_DEGRADED", "RATE_LIMITED", "SOURCE_UNAVAILABLE", "SOURCE_REJECTED",
-                "INVALID_FILTER", "UNPUSHED_FILTER", "TOO_BROAD", "FETCH_CAPPED",
-                "INDEX_UNAVAILABLE", "ARGUMENT_REFUSED")
-
-
-def short(body, figure=None):
-    """None when the view says its answer is whole; else the line a check prints in place of the
-    figure: `REFUSED: <why>` or `PARTIAL <figure>: <the engine's reason>`."""
-    tag = "PARTIAL" if figure is None else f"PARTIAL {figure}"
-    if body.get("status") != "SUCCEEDED":
-        return f"REFUSED: {body.get('status')} {json.dumps(body.get('error'))[:200]}"
-    ws = [w for w in body.get("warnings") or [] if isinstance(w, dict) and w.get("code") in SHORT_PUBLIC]
-    if body.get("outcome") not in ("OK", "EMPTY") or ws:
-        return f"{tag}: " + (f"{ws[0]['code']}: {ws[0].get('message', '')}" if ws else f"outcome {body.get('outcome')}")[:200]
-    return None
+# Whether an answer is the whole truth is the engine's to say, beside the rows: short() from the
+# battery library (tests/lib, pinned from embabel-worlds/realm-spec) is None when it is, else the
+# line to print in place of the figure, `REFUSED: <why>` or `PARTIAL <figure>: <the engine's reason>`.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+from short import short  # noqa: E402
 
 
 def answers(name, args, needs):
